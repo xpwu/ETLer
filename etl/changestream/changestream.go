@@ -1,4 +1,4 @@
-package etl
+package changestream
 
 import (
   "context"
@@ -11,9 +11,8 @@ import (
   "time"
 )
 
-func AutoRestart(name string, startAndBlock func(context.Context)) {
+func AutoRestart(ctx context.Context, name string, startAndBlock func(context.Context)) {
   go func() {
-    ctx := context.Background()
     ctx, logger := log.WithCtx(ctx)
     logger.PushPrefix(name)
 
@@ -41,7 +40,7 @@ func AutoRestart(name string, startAndBlock func(context.Context)) {
 
 
 func Start() {
-  AutoRestart("change-stream", startAndBlock)
+  AutoRestart(context.TODO(), "change-stream", startAndBlock)
 }
 
 func startAndBlock(ctx context.Context) {
@@ -54,7 +53,7 @@ func startAndBlock(ctx context.Context) {
 
   csr := newCsr(ctx, client)
 
-  rt, ok := db.Cache().ResumeToken()
+  rt, ok := db.Cache().ResumeToken(ctx)
   if ok {
     logger.Info("read resume token = " + rt.String() + ".")
     needWatch := csr.resumeWatch(rt)
@@ -80,7 +79,7 @@ func newCsr(ctx context.Context, client *mongocache.Client) *changeStreamRunner 
     watchColl: make(map[string]bool),
   }
 
-  for _, c := range db.WatchCollection().All() {
+  for _, c := range db.WatchCollection().All(ctx) {
     r.watchColl[c.Id()] = true
   }
 
@@ -110,10 +109,10 @@ func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
 
   // 只是保存监听的
   if csr.watchColl[cid] {
-    db.Stream().Save(streamId, cs.Current)
+    db.Stream().Save(csr.ctx, streamId, cs.Current)
   }
 
-  db.Cache().SaveResumeToken(cs.ResumeToken())
+  db.Cache().SaveResumeToken(csr.ctx, cs.ResumeToken())
 
   // todo send
 

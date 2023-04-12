@@ -21,7 +21,7 @@ type etl struct {
   SendToUrl        string
 }
 
-var Etl = &etl{SendToUrl: "http://send/data/to", FullDocument: true}
+var Etl = &etl{SendToUrl: "http://send/data/to", FullDocument: true, WatchCollections: []WatchInfo{}}
 
 func init() {
   configs.Unmarshal(Etl)
