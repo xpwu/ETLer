@@ -1,0 +1,182 @@
+package etl
+
+import (
+  "context"
+  "github.com/xpwu/ETLer/etl/config"
+  "github.com/xpwu/ETLer/etl/db"
+  "github.com/xpwu/go-db-mongo/mongodb/mongocache"
+  "github.com/xpwu/go-log/log"
+  "go.mongodb.org/mongo-driver/mongo"
+  "go.mongodb.org/mongo-driver/mongo/options"
+  "time"
+)
+
+func AutoRestart(name string, startAndBlock func(context.Context)) {
+  go func() {
+    ctx := context.Background()
+    ctx, logger := log.WithCtx(ctx)
+    logger.PushPrefix(name)
+
+    for {
+      func() {
+        ctx, cancel := context.WithCancel(ctx)
+        ctx, logger := log.WithCtx(ctx)
+
+        logger.Info("start")
+        defer func() {
+          if r := recover(); r != nil {
+            logger.Fatal(r)
+          }
+          cancel()
+        }()
+
+        startAndBlock(ctx)
+      }()
+
+      logger.Error("crashed! Will be restarted automatically after 5s")
+      time.Sleep(5 * time.Second)
+    }
+  }()
+}
+
+
+func Start() {
+  AutoRestart("change-stream", startAndBlock)
+}
+
+func startAndBlock(ctx context.Context) {
+  ctx, logger := log.WithCtx(ctx)
+
+  client, err := mongocache.Get(ctx, config.Etl.Deployment)
+  if err != nil {
+    panic(err)
+  }
+
+  csr := newCsr(ctx, client)
+
+  rt, ok := db.Cache().ResumeToken()
+  if ok {
+    logger.Info("read resume token = " + rt.String() + ".")
+    needWatch := csr.resumeWatch(rt)
+    if !needWatch {
+      panic("resume watch error")
+    }
+    logger.Error("resume watch failed, will try no-resume watch")
+  }
+
+  csr.noResumeWatch()
+}
+
+type changeStreamRunner struct {
+  ctx       context.Context
+  client    *mongocache.Client
+  watchColl map[string]bool
+}
+
+func newCsr(ctx context.Context, client *mongocache.Client) *changeStreamRunner {
+  r := &changeStreamRunner{
+    ctx:       ctx,
+    client:    client,
+    watchColl: make(map[string]bool),
+  }
+
+  for _, c := range db.WatchCollection().All() {
+    r.watchColl[c.Id()] = true
+  }
+
+  return r
+}
+
+type event struct {
+  Ns struct {
+    Db   string `bson:"db"`
+    Coll string `bson:"coll"`
+  } `bson:"ns"`
+}
+
+func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
+  ce := event{}
+  err := cs.Decode(&ce)
+  if err != nil {
+    return err
+  }
+
+  cid := config.WatchInfo{
+    DB:         ce.Ns.Db,
+    Collection: ce.Ns.Coll,
+  }.Id()
+
+  streamId := cs.ResumeToken().String()
+
+  // 只是保存监听的
+  if csr.watchColl[cid] {
+    db.Stream().Save(streamId, cs.Current)
+  }
+
+  db.Cache().SaveResumeToken(cs.ResumeToken())
+
+  // todo send
+
+  return nil
+}
+
+func (csr *changeStreamRunner) resumeWatch(token db.ResumeToken) (needWatch bool) {
+  ctx, logger := log.WithCtx(csr.ctx)
+  logger.PushPrefix("resume token.")
+
+  cs, err := csr.client.Watch(ctx, mongo.Pipeline{},
+    options.ChangeStream().SetFullDocument(options.UpdateLookup).SetResumeAfter(token))
+
+  if err != nil {
+    // 目前没有文档说明，错误是resume不成功，还是其他错误，所以返回true，表示需要普通watch
+    logger.Error(err)
+    return true
+  }
+
+  first := true
+  for cs.Next(ctx) {
+    first = false
+
+    err = csr.processCs(cs)
+    if err != nil {
+     break
+    }
+  }
+
+  if err == nil {
+    err = cs.Err()
+  }
+  logger.Error(err)
+
+  // 目前没有文档说明，错误是resume不成功，还是其他错误，所以如果是第一次Next()，就返回true，表示需要普通watch
+  // 不是第一次就说明肯定不是resumeToken找不到引起的错误，就返回false，
+  return first
+}
+
+func (csr *changeStreamRunner) noResumeWatch() {
+  ctx, logger := log.WithCtx(csr.ctx)
+  logger.PushPrefix("no-resume watch.")
+
+  cs, err := csr.client.Watch(ctx, mongo.Pipeline{},
+    options.ChangeStream().SetFullDocument(options.UpdateLookup))
+
+  if err != nil {
+    logger.Error(err)
+    panic(err)
+  }
+
+  // todo  sync
+
+  for cs.Next(ctx) {
+    err = csr.processCs(cs)
+    if err != nil {
+      break
+    }
+  }
+
+  if err == nil {
+    err = cs.Err()
+  }
+  logger.Error(err)
+  panic(err)
+}
