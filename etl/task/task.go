@@ -49,7 +49,7 @@ func startAndBlock(ctx context.Context) {
     case <-forceSync:
       // todo stop
       stop <- struct{}{}
-      tr.reinitTask()
+      tr.forceSync()
       go tr.run(stop)
     case <-changestream:
       // exhaust
