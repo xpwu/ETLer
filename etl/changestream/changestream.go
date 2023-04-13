@@ -4,43 +4,15 @@ import (
   "context"
   "github.com/xpwu/ETLer/etl/config"
   "github.com/xpwu/ETLer/etl/db"
+  "github.com/xpwu/ETLer/etl/x"
   "github.com/xpwu/go-db-mongo/mongodb/mongocache"
   "github.com/xpwu/go-log/log"
   "go.mongodb.org/mongo-driver/mongo"
   "go.mongodb.org/mongo-driver/mongo/options"
-  "time"
 )
 
-func AutoRestart(ctx context.Context, name string, startAndBlock func(context.Context)) {
-  go func() {
-    ctx, logger := log.WithCtx(ctx)
-    logger.PushPrefix(name)
-
-    for {
-      func() {
-        ctx, cancel := context.WithCancel(ctx)
-        ctx, logger := log.WithCtx(ctx)
-
-        logger.Info("start")
-        defer func() {
-          if r := recover(); r != nil {
-            logger.Fatal(r)
-          }
-          cancel()
-        }()
-
-        startAndBlock(ctx)
-      }()
-
-      logger.Error("crashed! Will be restarted automatically after 5s")
-      time.Sleep(5 * time.Second)
-    }
-  }()
-}
-
-
 func Start() {
-  AutoRestart(context.TODO(), "change-stream", startAndBlock)
+  x.AutoRestart(context.TODO(), "change-stream", startAndBlock)
 }
 
 func startAndBlock(ctx context.Context) {

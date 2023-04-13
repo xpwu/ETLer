@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/ETLer/etl/db"
+	"github.com/xpwu/ETLer/etl/x"
 	"github.com/xpwu/go-db-mongo/mongodb/mongocache"
 	"github.com/xpwu/go-log/log"
 	"go.mongodb.org/mongo-driver/bson"
@@ -21,7 +22,8 @@ const (
 	stopped
 
 	batch   int = 1000
-	maxWait     = 5 * time.Minute
+	maxWait     = 10 * time.Minute
+	retry       = 1 * time.Minute
 )
 
 type taskRunner struct {
@@ -69,7 +71,7 @@ func exhaust(ch <-chan struct{}) {
 }
 
 func Start() {
-
+	x.AutoRestart(context.TODO(), "task", startAndBlock)
 }
 
 func startAndBlock(ctx context.Context) {
@@ -100,8 +102,8 @@ func startAndBlock(ctx context.Context) {
 				}
 				atomic.StoreInt32(&tr.state, stopped)
 				tr.forceSync()
-				PostRunTask()
 				atomic.StoreInt32(&tr.state, canRun)
+				PostRunTask()
 			}
 		}
 	}()
@@ -248,7 +250,7 @@ func (t *taskRunner) sync(stop <-chan struct{}) error {
 		for {
 			select {
 			case <-stop:
-				logger.Info("sync is stopped by caller")
+				logger.Info("sync task is stopped by caller")
 				return nil
 			case <-ctx.Done():
 				logger.Error(ctx.Err())
@@ -271,7 +273,13 @@ func (t *taskRunner) sync(stop <-chan struct{}) error {
 				all = append(all, cursor.Current)
 			}
 
-			// todo send  all to upstream
+			if !Sender.Do(ctx, Sync, all) {
+				if !t.timeout.Stop() {
+					<-t.timeout.C
+				}
+				t.timeout.Reset(retry)
+				return nil
+			}
 
 			// over
 			if i < batch {
@@ -320,7 +328,7 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 	for ok {
 		select {
 		case <-stop:
-			logger.Info("sync is stopped by caller")
+			logger.Info("change stream task is stopped by caller")
 			return nil
 		case <-ctx.Done():
 			logger.Error(ctx.Err())
@@ -328,7 +336,13 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 		default:
 		}
 
-		// todo send values
+		if !Sender.Do(ctx, ChangeStream, values) {
+			if !t.timeout.Stop() {
+				<-t.timeout.C
+			}
+			t.timeout.Reset(retry)
+			return nil
+		}
 
 		db.Cache().SaveSentStreamId(ctx, streamId)
 		values, streamId, ok = db.Stream().Next(ctx, streamId, batch)
