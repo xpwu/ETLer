@@ -15,6 +15,17 @@ func Start() {
   x.AutoRestart(context.TODO(), "change-stream", startAndBlock)
 }
 
+type Listener interface {
+  ForceSync()
+  StreamChanged()
+}
+
+var listener Listener
+
+func SetListener(l Listener) {
+  listener = l
+}
+
 func startAndBlock(ctx context.Context) {
   ctx, logger := log.WithCtx(ctx)
 
@@ -86,7 +97,7 @@ func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
 
   db.Cache().SaveResumeToken(csr.ctx, cs.ResumeToken())
 
-  // todo send
+  listener.StreamChanged()
 
   return nil
 }
@@ -136,7 +147,7 @@ func (csr *changeStreamRunner) noResumeWatch() {
     panic(err)
   }
 
-  // todo  sync
+  listener.ForceSync()
 
   for cs.Next(ctx) {
     err = csr.processCs(cs)
