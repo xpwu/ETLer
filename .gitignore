@@ -15,3 +15,4 @@
 # vendor/
 .idea
 leveldb/stream_test_db
+leveldb/out

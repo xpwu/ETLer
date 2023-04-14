@@ -2,8 +2,10 @@ package main
 
 import (
 	"github.com/xpwu/ETLer/etl"
+	"github.com/xpwu/ETLer/leveldb"
 	"github.com/xpwu/go-cmd/arg"
 	"github.com/xpwu/go-cmd/cmd"
+	"github.com/xpwu/go-cmd/exe"
 )
 
 func main()  {
@@ -12,8 +14,7 @@ func main()  {
 		arg.ReadConfig(args)
 		args.Parse()
 
-		// todo set db
-
+		leveldb.Init(exe.Exe.AbsDir)
 		etl.Start()
 
 		// block

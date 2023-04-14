@@ -169,7 +169,7 @@ func newStream(root string) *stream {
 	max, err := ldb.Get([]byte{maxSeqKey}, nil)
 	if err == leveldb.ErrNotFound {
 		// max = 1, 防止边界问题，所以初始化为1
-		max = []byte{0, 0, 0, 0, 0, 0, 0, 1}
+		max = uint642bytes(1)
 	}
 	if err != nil {
 		panic(err)
