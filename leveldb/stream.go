@@ -170,6 +170,7 @@ func newStream(root string) *stream {
 	if err == leveldb.ErrNotFound {
 		// max = 1, 防止边界问题，所以初始化为1
 		max = uint642bytes(1)
+		err = nil
 	}
 	if err != nil {
 		panic(err)

@@ -7,8 +7,9 @@ import (
 
 func Init(root string) {
 	root = filepath.Join(root, "db")
-	db.SetCache(newCache(root))
+	c := newCache(root)
+	db.SetCache(c)
 	db.SetStream(newStream(root))
 	db.SetSyncTask(newSyncTask(root))
-	db.SetWatchCollection(newCache(root))
+	db.SetWatchCollection(c)
 }
