@@ -24,7 +24,7 @@ func (t Type) String() string {
 }
 
 const (
-	Sync = iota
+	Sync Type = iota
 	ChangeStream
 )
 
