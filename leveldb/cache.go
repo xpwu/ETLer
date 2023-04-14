@@ -42,14 +42,14 @@ func (c *cache) SaveResumeToken(ctx context.Context, token db.ResumeToken) {
 func (c *cache) SentStreamId(ctx context.Context) (id db.StreamId, ok bool) {
 	r, err := c.db.Get([]byte(sentStreamKey), nil)
 	if err == leveldb.ErrNotFound {
-		return "", false
+		return nil, false
 	}
 
 	if err != nil {
 		panic(err)
 	}
 
-	return string(r), true
+	return r, true
 }
 
 func (c *cache) DelSentStreamId(ctx context.Context) {

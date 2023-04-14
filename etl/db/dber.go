@@ -6,7 +6,7 @@ import (
   "go.mongodb.org/mongo-driver/bson"
 )
 
-type StreamId []byte
+type StreamId = []byte
 
 type StreamValue = bson.Raw
 
