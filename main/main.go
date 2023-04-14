@@ -5,6 +5,7 @@ import (
 	"github.com/xpwu/ETLer/leveldb"
 	"github.com/xpwu/go-cmd/arg"
 	"github.com/xpwu/go-cmd/cmd"
+	_ "github.com/xpwu/go-cmd/cmd/printconf"
 	"github.com/xpwu/go-cmd/exe"
 )
 
