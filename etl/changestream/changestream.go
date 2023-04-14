@@ -88,11 +88,9 @@ func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
     Collection: ce.Ns.Coll,
   }.Id()
 
-  streamId := cs.ResumeToken().String()
-
   // 只是保存监听的
   if csr.watchColl[cid] {
-    db.Stream().Save(csr.ctx, streamId, cs.Current)
+    db.Stream().Save(csr.ctx, cs.ResumeToken(), cs.Current)
   }
 
   db.Cache().SaveResumeToken(csr.ctx, cs.ResumeToken())

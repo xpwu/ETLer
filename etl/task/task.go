@@ -192,7 +192,10 @@ func (t *taskRunner) run(stop <-chan struct{}) {
 		return
 	}
 
-	_, sync := db.SyncTask().First(t.ctx)
+	iter := db.SyncTask().All(t.ctx)
+	_, sync := iter.First(t.ctx)
+	iter.Release()
+
 	defer func() {
 		atomic.CompareAndSwapInt32(&t.state, running, canRun)
 		// ensure the stop channel is empty
@@ -232,7 +235,10 @@ func deserialize(bytes []byte) bson.RawValue {
 func (t *taskRunner) sync(stop <-chan struct{}) error {
 	ctx, logger := log.WithCtx(t.ctx)
 
-	task, ok := db.SyncTask().First(ctx)
+	iter := db.SyncTask().All(t.ctx)
+	defer iter.Release()
+
+	task, ok := iter.First(ctx)
 	for ok {
 		select {
 		case <-stop:
@@ -291,7 +297,7 @@ func (t *taskRunner) sync(stop <-chan struct{}) error {
 			db.SyncTask().InsertOrUpdate(ctx, task)
 		}
 
-		task, ok = db.SyncTask().Next(ctx, task.Id())
+		task, ok = iter.Next(ctx)
 	}
 
 	return nil
@@ -302,21 +308,31 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 
 	streamId, ok := db.Cache().SentStreamId(ctx)
 	values := make([]db.StreamValue, 0, batch)
+	var iter db.StreamIterator
+	if ok {
+		iter = db.Stream().StartWith(ctx, streamId)
+	} else {
+		iter = db.Stream().All(ctx)
+	}
+	defer iter.Release()
 
 	if ok {
-		_, ok = db.Stream().Get(ctx, streamId)
+		var newId db.StreamId
+		newId, _, ok = iter.First(ctx)
+
 		// 之前发送过的stream 已经不能在stream找到，说明中间有断层，必须force sync
-		if !ok {
+		if string(newId) != string(streamId) {
 			PostForceSync()
 			return nil
 		}
-		values, streamId, ok = db.Stream().Next(ctx, streamId, 1)
+
+		values, streamId, ok = iter.Next(ctx, 1)
 		if !ok {
 			return nil
 		}
 	} else {
 		var value db.StreamValue
-		streamId, value, ok = db.Stream().First(ctx)
+		streamId, value, ok = iter.First(ctx)
 
 		if !ok {
 			logger.Info("no stream")
@@ -345,7 +361,7 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 		}
 
 		db.Cache().SaveSentStreamId(ctx, streamId)
-		values, streamId, ok = db.Stream().Next(ctx, streamId, batch)
+		values, streamId, ok = iter.Next(ctx, batch)
 	}
 
 	return nil
