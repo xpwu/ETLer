@@ -12,7 +12,7 @@ import (
 
 type Type byte
 
-func (t Type)String() string {
+func (t Type) String() string {
 	switch t {
 	case Sync:
 		return "sync"
@@ -29,24 +29,30 @@ const (
 )
 
 type Proxy interface {
-	Do(ctx context.Context, ty Type, data []bson.Raw) (ok bool)
+	Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (ok bool)
 }
 
 var Sender Proxy = &http{}
 
+type ns struct {
+	DB   string
+	Coll string
+}
+
 type Request struct {
 	T Type
-	data []bson.Raw
+	// T == ChangeStream, Ns = {DB: "", Coll: ""}
+	Ns ns
+	Data []bson.Raw
 }
 
 type Response struct {
 }
 
 type http struct {
-
 }
 
-func (h *http) Do(ctx context.Context, ty Type, data []bson.Raw) (ok bool) {
+func (h *http) Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (ok bool) {
 	ctx, logger := log.WithCtx(ctx)
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -54,7 +60,11 @@ func (h *http) Do(ctx context.Context, ty Type, data []bson.Raw) (ok bool) {
 	logger.PushPrefix(fmt.Sprintf("send: %s, len(data): %d", ty, len(data)))
 	r := &Request{
 		T:    ty,
-		data: data,
+		Ns: ns{
+			DB:   db,
+			Coll: coll,
+		},
+		Data: data,
 	}
 	err := httpc.Send(ctx, config.Etl.SendToUrl, httpc.WithStructBodyToJson(r))
 	if err != nil {
@@ -64,4 +74,3 @@ func (h *http) Do(ctx context.Context, ty Type, data []bson.Raw) (ok bool) {
 
 	return true
 }
-

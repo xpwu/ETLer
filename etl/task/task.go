@@ -279,7 +279,7 @@ func (t *taskRunner) sync(stop <-chan struct{}) error {
 				all = append(all, cursor.Current)
 			}
 
-			if !Sender.Do(ctx, Sync, all) {
+			if !Sender.Do(ctx, Sync, task.DB, task.Collection, all) {
 				if !t.timeout.Stop() {
 					<-t.timeout.C
 				}
@@ -352,7 +352,7 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 		default:
 		}
 
-		if !Sender.Do(ctx, ChangeStream, values) {
+		if !Sender.Do(ctx, ChangeStream, "", "", values) {
 			if !t.timeout.Stop() {
 				<-t.timeout.C
 			}
