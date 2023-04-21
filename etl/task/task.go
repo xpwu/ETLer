@@ -34,8 +34,9 @@ type taskRunner struct {
 }
 
 var (
-	forceSync = make(chan struct{}, 1)
-	runTask   = make(chan struct{}, 1)
+	forceSync    = make(chan struct{}, 1)
+	runTask      = make(chan struct{}, 1)
+	syncPrepared = make(chan struct{}, 1)
 )
 
 func ForceSyncChan() chan<- struct{} {
@@ -47,6 +48,12 @@ func PostForceSync() {
 	case ForceSyncChan() <- struct{}{}:
 	default:
 	}
+}
+
+func PostForceSyncAndWait() {
+	exhaust(syncPrepared)
+	PostForceSync()
+	<-syncPrepared
 }
 
 func RunTaskChan() chan<- struct{} {
@@ -103,10 +110,18 @@ func startAndBlock(ctx context.Context) {
 				atomic.StoreInt32(&tr.state, stopped)
 				tr.forceSync()
 				atomic.StoreInt32(&tr.state, canRun)
+
+				select {
+				case syncPrepared <- struct{}{}:
+				default:
+				}
+
 				PostRunTask()
 			}
 		}
 	}()
+
+	tr.run(stop)
 
 	for {
 		select {

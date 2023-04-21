@@ -10,7 +10,7 @@ type listener struct {
 }
 
 func (l *listener) ForceSync() {
-	task.PostForceSync()
+	task.PostForceSyncAndWait()
 }
 
 func (l *listener) StreamChanged() {

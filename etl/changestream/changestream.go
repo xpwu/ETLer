@@ -152,6 +152,8 @@ func (csr *changeStreamRunner) noResumeWatch() {
 
 	listener.ForceSync()
 
+	db.Cache().SaveResumeToken(csr.ctx, cs.ResumeToken())
+
 	for cs.Next(ctx) {
 		err = csr.processCs(cs)
 		if err != nil {
