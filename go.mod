@@ -8,7 +8,7 @@ require (
 	github.com/xpwu/go-cmd v0.1.0
 	github.com/xpwu/go-config v0.1.0
 	github.com/xpwu/go-db-mongo v0.1.0
-	github.com/xpwu/go-httpclient v0.1.0
+	github.com/xpwu/go-httpclient v0.1.1
 	github.com/xpwu/go-log v0.1.0
 	go.mongodb.org/mongo-driver v1.8.4
 )
