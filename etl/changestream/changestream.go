@@ -62,6 +62,11 @@ func newCsr(ctx context.Context, client *mongocache.Client) *changeStreamRunner 
 		watchColl: make(map[string]bool),
 	}
 
+	// 配置的与之前存储的都加入监听，宁多不少，多了后面的处理服务器也会自动处理
+	// 发送历史的change stream 本也就有之前缓存的 stream
+	for _,c := range config.Etl.WatchCollections {
+		r.watchColl[c.Id()] = true
+	}
 	for _, c := range db.WatchCollection().All(ctx) {
 		r.watchColl[c.Id()] = true
 	}
