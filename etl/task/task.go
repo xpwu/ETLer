@@ -105,7 +105,7 @@ func startAndBlock(ctx context.Context) {
 		panic(err)
 	}
 
-	//runClientCli(ctx)
+	runClientCli(ctx)
 
 	tr := &taskRunner{
 		ctx:     ctx,
@@ -233,6 +233,8 @@ func (t *taskRunner) reinitTask() {
 }
 
 func (t *taskRunner) forceSyncATask(wi *config.WatchInfo) error {
+	_, logger := log.WithCtx(t.ctx)
+
 	inConfig := false
 	for _, info := range config.Etl.WatchCollections {
 		if info == *wi {
@@ -245,6 +247,7 @@ func (t *taskRunner) forceSyncATask(wi *config.WatchInfo) error {
 	}
 
 	db.SyncTask().InsertOrUpdate(t.ctx, MinKeyTask(*wi))
+	logger.Info("will sync ", wi.Id())
 	return nil
 }
 

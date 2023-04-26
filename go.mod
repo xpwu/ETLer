@@ -5,7 +5,7 @@ go 1.17
 require (
 	github.com/stretchr/testify v1.6.1
 	github.com/syndtr/goleveldb v1.0.0
-	github.com/xpwu/go-cmd v0.1.0
+	github.com/xpwu/go-cmd v0.1.1-0.20230426165913-ffc4170be1d6
 	github.com/xpwu/go-config v0.1.0
 	github.com/xpwu/go-db-mongo v0.1.0
 	github.com/xpwu/go-httpclient v0.1.1
@@ -34,3 +34,5 @@ require (
 	golang.org/x/text v0.3.5 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c // indirect
 )
+
+//replace github.com/xpwu/go-cmd => ../go-cmd
