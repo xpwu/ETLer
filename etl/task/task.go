@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/ETLer/etl/db"
 	"github.com/xpwu/ETLer/etl/x"
@@ -35,39 +36,53 @@ type taskRunner struct {
 
 var (
 	forceSync    = make(chan struct{}, 1)
-	runTask      = make(chan struct{}, 1)
 	syncPrepared = make(chan struct{}, 1)
-)
 
-func ForceSyncChan() chan<- struct{} {
-	return forceSync
-}
+	runTask = make(chan struct{}, 1)
+
+	syncATask     = make(chan *config.WatchInfo, 1)
+	syncATaskDone = make(chan error, 1)
+)
 
 func PostForceSync() {
 	select {
-	case ForceSyncChan() <- struct{}{}:
+	case forceSync <- struct{}{}:
 	default:
 	}
 }
 
+// PostForceSyncAndWait sync all
 func PostForceSyncAndWait() {
 	exhaust(syncPrepared)
 	PostForceSync()
 	<-syncPrepared
 }
 
-func RunTaskChan() chan<- struct{} {
-	return runTask
+func SyncATask(w *config.WatchInfo) error {
+	exhaust2(syncATaskDone)
+	syncATask <- w
+	err := <-syncATaskDone
+	return err
 }
 
 func PostRunTask() {
 	select {
-	case RunTaskChan() <- struct{}{}:
+	case runTask <- struct{}{}:
 	default:
 	}
 }
 
 func exhaust(ch <-chan struct{}) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
+func exhaust2(ch <-chan error) {
 	for {
 		select {
 		case <-ch:
@@ -117,6 +132,18 @@ func startAndBlock(ctx context.Context) {
 				}
 
 				PostRunTask()
+
+			case w := <-syncATask:
+				if atomic.CompareAndSwapInt32(&tr.state, running, stopped) {
+					stop <- struct{}{}
+				}
+				atomic.StoreInt32(&tr.state, stopped)
+				err := tr.forceSyncATask(w)
+				atomic.StoreInt32(&tr.state, canRun)
+
+				PostRunTask()
+
+				syncATaskDone <- err
 			}
 		}
 	}()
@@ -200,6 +227,22 @@ func (t *taskRunner) reinitTask() {
 	db.SyncTask().InsertOrUpdateBatch(t.ctx, add)
 	// 防御性代码
 	db.WatchCollection().Save(t.ctx, config.Etl.WatchCollections)
+}
+
+func (t *taskRunner) forceSyncATask(wi *config.WatchInfo) error {
+	inConfig := false
+	for _, info := range config.Etl.WatchCollections {
+		if info == *wi {
+			inConfig = true
+			break
+		}
+	}
+	if !inConfig {
+		return fmt.Errorf("%s is not in config file", wi.Id())
+	}
+
+	db.SyncTask().InsertOrUpdate(t.ctx, MinKeyTask(*wi))
+	return nil
 }
 
 func (t *taskRunner) run(stop <-chan struct{}) {
