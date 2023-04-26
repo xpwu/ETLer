@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/ETLer/etl/db"
@@ -103,6 +104,8 @@ func startAndBlock(ctx context.Context) {
 		logger.Error(err)
 		panic(err)
 	}
+
+	//runClientCli(ctx)
 
 	tr := &taskRunner{
 		ctx:     ctx,
@@ -261,11 +264,20 @@ func (t *taskRunner) run(stop <-chan struct{}) {
 	}()
 
 	if sync {
-		if err := t.sync(stop); err != nil {
+		err := t.sync(stop)
+		if err == senderErr {
+			return
+		}
+		if err != nil {
 			panic(err)
 		}
 	}
-	if err := t.changeStream(stop); err != nil {
+
+	err := t.changeStream(stop)
+	if err == senderErr {
+		return
+	}
+	if err != nil {
 		panic(err)
 	}
 }
@@ -289,6 +301,8 @@ func deserialize(bytes []byte) bson.RawValue {
 		Value: bytes[1:],
 	}
 }
+
+var senderErr = errors.New("sync sender error")
 
 func (t *taskRunner) sync(stop <-chan struct{}) error {
 	ctx, logger := log.WithCtx(t.ctx)
@@ -342,7 +356,8 @@ func (t *taskRunner) sync(stop <-chan struct{}) error {
 					<-t.timeout.C
 				}
 				t.timeout.Reset(retry)
-				return nil
+				logger.Warning("sync sender error. retry after ", retry.Seconds(), " s")
+				return senderErr
 			}
 
 			// over
@@ -393,7 +408,7 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 		streamId, value, ok = iter.First(ctx)
 
 		if !ok {
-			logger.Info("no stream")
+			logger.Info("sendChangeStream: has not stream to send")
 			return nil
 		}
 		values = append(values, value)
@@ -415,7 +430,8 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 				<-t.timeout.C
 			}
 			t.timeout.Reset(retry)
-			return nil
+			logger.Warning("changeStream sender error. retry after ", retry.Seconds(), " s")
+			return senderErr
 		}
 
 		db.Cache().SaveSentStreamId(ctx, streamId)
