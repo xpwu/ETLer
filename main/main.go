@@ -10,7 +10,7 @@ import (
 )
 
 func main()  {
-	cmd.RegisterCmd(cmd.DefaultCmdName, "start elter", func(args *arg.Arg) {
+	cmd.RegisterCmd(cmd.DefaultCmdName, "start etler", func(args *arg.Arg) {
 
 		arg.ReadConfig(args)
 		args.Parse()
