@@ -94,7 +94,7 @@ func exhaust2(ch <-chan error) {
 }
 
 func Start() {
-	x.AutoRestart(context.TODO(), "task", startAndBlock)
+	x.AutoRestart(context.TODO(), "send-task", startAndBlock)
 }
 
 func startAndBlock(ctx context.Context) {
@@ -265,7 +265,7 @@ func (t *taskRunner) run(stop <-chan struct{}) {
 
 	if sync {
 		err := t.sync(stop)
-		if err == senderErr {
+		if err == senderErr || err == stoppedErr {
 			return
 		}
 		if err != nil {
@@ -274,7 +274,7 @@ func (t *taskRunner) run(stop <-chan struct{}) {
 	}
 
 	err := t.changeStream(stop)
-	if err == senderErr {
+	if err == senderErr || err == stoppedErr {
 		return
 	}
 	if err != nil {
@@ -302,7 +302,8 @@ func deserialize(bytes []byte) bson.RawValue {
 	}
 }
 
-var senderErr = errors.New("sync sender error")
+var senderErr = errors.New("sender error")
+var stoppedErr = errors.New("stopped")
 
 func (t *taskRunner) sync(stop <-chan struct{}) error {
 	ctx, logger := log.WithCtx(t.ctx)
@@ -315,7 +316,7 @@ func (t *taskRunner) sync(stop <-chan struct{}) error {
 		select {
 		case <-stop:
 			logger.Info("sync is stopped by caller")
-			return nil
+			return stoppedErr
 		case <-ctx.Done():
 			logger.Error(ctx.Err())
 			return ctx.Err()
@@ -329,7 +330,7 @@ func (t *taskRunner) sync(stop <-chan struct{}) error {
 			select {
 			case <-stop:
 				logger.Info("sync task is stopped by caller")
-				return nil
+				return stoppedErr
 			case <-ctx.Done():
 				logger.Error(ctx.Err())
 				return ctx.Err()
@@ -360,14 +361,21 @@ func (t *taskRunner) sync(stop <-chan struct{}) error {
 				return senderErr
 			}
 
+			err = cursor.Err()
+
 			// over
-			if i < batch {
+			if i < batch && err == nil {
 				db.SyncTask().Del(ctx, task.Id())
 				break
 			}
 			// update
 			task.StartDocId = serialize(docId)
 			db.SyncTask().InsertOrUpdate(ctx, task)
+
+			if err != nil {
+				logger.Error("cursor error.", err)
+				return err
+			}
 		}
 
 		task, ok = iter.Next(ctx)
@@ -418,7 +426,7 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 		select {
 		case <-stop:
 			logger.Info("change stream task is stopped by caller")
-			return nil
+			return stoppedErr
 		case <-ctx.Done():
 			logger.Error(ctx.Err())
 			return ctx.Err()
