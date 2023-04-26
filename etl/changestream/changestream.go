@@ -113,8 +113,19 @@ func (csr *changeStreamRunner) resumeWatch(token db.ResumeToken) (needWatch bool
 		options.ChangeStream().SetFullDocument(options.UpdateLookup).SetResumeAfter(token))
 
 	if err != nil {
-		// 目前没有文档说明，错误是resume不成功，还是其他错误，所以返回true，表示需要普通watch
 		logger.Error(err)
+
+		// 目前没有文档说明，错误是resume不成功，还是其他错误，所以默认返回true，表示需要普通watch
+		// 只能尽可能的判断，因为进入no-resume流程时，会触发sync，但如果是网络错误，其实不应该触发
+		if mongo.IsTimeout(err) {
+			logger.Error("timeout err, not try no-resume watch ", err)
+			return false
+		}
+		if mongo.IsNetworkError(err) {
+			logger.Error("network err, not try no-resume watch ", err)
+			return false
+		}
+
 		return true
 	}
 
