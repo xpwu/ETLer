@@ -2,11 +2,13 @@ package changestream
 
 import (
 	"context"
+	"fmt"
 	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/ETLer/etl/db"
 	"github.com/xpwu/ETLer/etl/x"
 	"github.com/xpwu/go-db-mongo/mongodb/mongocache"
 	"github.com/xpwu/go-log/log"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -64,7 +66,7 @@ func newCsr(ctx context.Context, client *mongocache.Client) *changeStreamRunner 
 
 	// 配置的与之前存储的都加入监听，宁多不少，多了后面的处理服务器也会自动处理
 	// 发送历史的change stream 本也就有之前缓存的 stream
-	for _,c := range config.Etl.WatchCollections {
+	for _, c := range config.Etl.WatchCollections {
 		r.watchColl[c.Id()] = true
 	}
 	for _, c := range db.WatchCollection().All(ctx) {
@@ -79,9 +81,19 @@ type event struct {
 		Db   string `bson:"db"`
 		Coll string `bson:"coll"`
 	} `bson:"ns"`
+	Id            bson.Raw `bson:"_id"`
+	OperationType string   `bson:"operationType"`
+	DocumentKey   bson.Raw `bson:"documentKey"`
+}
+
+func (e *event) String() string {
+	return fmt.Sprintf("%s.%s %s at _id:%s, with resumetoken: %s",
+		e.Ns.Db, e.Ns.Coll, e.OperationType, e.DocumentKey, e.Id)
 }
 
 func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
+	_, logger := log.WithCtx(csr.ctx)
+
 	ce := event{}
 	err := cs.Decode(&ce)
 	if err != nil {
@@ -93,8 +105,10 @@ func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
 		Collection: ce.Ns.Coll,
 	}.Id()
 
+	logger.Debug("watched: ", ce.String())
 	// 只是保存监听的
 	if csr.watchColl[cid] {
+		logger.Info("save change stream: ", ce.String())
 		db.Stream().Save(csr.ctx, cs.ResumeToken(), cs.Current)
 	}
 
