@@ -308,6 +308,15 @@ func deserialize(bytes []byte) bson.RawValue {
 var senderErr = errors.New("sender error")
 var stoppedErr = errors.New("stopped")
 
+func selectErr(isStop <-chan bool, elseErr error) error {
+	select {
+	case <-isStop:
+		return stoppedErr
+	default:
+		return elseErr
+	}
+}
+
 func (t *taskRunner) sync(stop <-chan struct{}) error {
 	ctx, logger := log.WithCtx(t.ctx)
 	ctx, cancel := context.WithCancel(ctx)
@@ -339,7 +348,7 @@ func (t *taskRunner) sync(stop <-chan struct{}) error {
 				options.Find().SetLimit(int64(batch)).SetSort(bson.D{{"_id", 1}}))
 			if err != nil {
 				logger.Error(err)
-				return err
+				return selectErr(isStop, err)
 			}
 
 			all := make([]bson.Raw, 0, batch)
@@ -372,12 +381,7 @@ func (t *taskRunner) sync(stop <-chan struct{}) error {
 
 			if err != nil {
 				logger.Error("cursor error.", err)
-				select {
-				case <-isStop:
-					return stoppedErr
-				default:
-					return err
-				}
+				return selectErr(isStop, err)
 			}
 		}
 
@@ -427,12 +431,7 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 
 		values, streamId, ok = iter.Next(ctx, 1)
 		if !ok {
-			select {
-			case <-isStop:
-				return stoppedErr
-			default:
-				return nil
-			}
+			return nil
 		}
 	} else {
 		var value db.StreamValue
@@ -440,12 +439,7 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 
 		if !ok {
 			logger.Info("sendChangeStream: has not stream to send")
-			select {
-			case <-isStop:
-				return stoppedErr
-			default:
-				return nil
-			}
+			return nil
 		}
 		values = append(values, value)
 	}
@@ -464,10 +458,5 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 		values, streamId, ok = iter.Next(ctx, batch)
 	}
 
-	select {
-	case <-isStop:
-		return stoppedErr
-	default:
-		return nil
-	}
+	return nil
 }
