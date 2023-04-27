@@ -310,36 +310,31 @@ var stoppedErr = errors.New("stopped")
 
 func (t *taskRunner) sync(stop <-chan struct{}) error {
 	ctx, logger := log.WithCtx(t.ctx)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	iter := db.SyncTask().All(t.ctx)
+	isStop := make(chan bool, 1)
+
+	iter := db.SyncTask().All(ctx)
 	defer iter.Release()
 
-	task, ok := iter.First(ctx)
-	for ok {
+	go func() {
 		select {
 		case <-stop:
 			logger.Info("sync is stopped by caller")
-			return stoppedErr
+			isStop <- true
+			cancel()
 		case <-ctx.Done():
 			logger.Error(ctx.Err())
-			return ctx.Err()
-		default:
 		}
+	}()
 
+	task, ok := iter.First(ctx)
+	for ok {
 		coll := t.client.Database(task.DB).Collection(task.Collection)
 		docId := deserialize(task.StartDocId)
 
 		for {
-			select {
-			case <-stop:
-				logger.Info("sync task is stopped by caller")
-				return stoppedErr
-			case <-ctx.Done():
-				logger.Error(ctx.Err())
-				return ctx.Err()
-			default:
-			}
-
 			cursor, err := coll.Find(ctx, bson.D{{"_id", bson.D{{"$gt", docId}}}},
 				options.Find().SetLimit(int64(batch)).SetSort(bson.D{{"_id", 1}}))
 			if err != nil {
@@ -377,7 +372,12 @@ func (t *taskRunner) sync(stop <-chan struct{}) error {
 
 			if err != nil {
 				logger.Error("cursor error.", err)
-				return err
+				select {
+				case <-isStop:
+					return stoppedErr
+				default:
+					return err
+				}
 			}
 		}
 
@@ -389,6 +389,21 @@ func (t *taskRunner) sync(stop <-chan struct{}) error {
 
 func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 	ctx, logger := log.WithCtx(t.ctx)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	isStop := make(chan bool, 1)
+
+	go func() {
+		select {
+		case <-stop:
+			logger.Info("change stream task is stopped by caller")
+			isStop <- true
+			cancel()
+		case <-ctx.Done():
+			logger.Error(ctx.Err())
+		}
+	}()
 
 	streamId, ok := db.Cache().SentStreamId(ctx)
 	values := make([]db.StreamValue, 0, batch)
@@ -412,7 +427,12 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 
 		values, streamId, ok = iter.Next(ctx, 1)
 		if !ok {
-			return nil
+			select {
+			case <-isStop:
+				return stoppedErr
+			default:
+				return nil
+			}
 		}
 	} else {
 		var value db.StreamValue
@@ -420,22 +440,17 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 
 		if !ok {
 			logger.Info("sendChangeStream: has not stream to send")
-			return nil
+			select {
+			case <-isStop:
+				return stoppedErr
+			default:
+				return nil
+			}
 		}
 		values = append(values, value)
 	}
 
 	for ok {
-		select {
-		case <-stop:
-			logger.Info("change stream task is stopped by caller")
-			return stoppedErr
-		case <-ctx.Done():
-			logger.Error(ctx.Err())
-			return ctx.Err()
-		default:
-		}
-
 		if !Sender.Do(ctx, ChangeStream, "", "", values) {
 			if !t.timeout.Stop() {
 				<-t.timeout.C
@@ -449,5 +464,10 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 		values, streamId, ok = iter.Next(ctx, batch)
 	}
 
-	return nil
+	select {
+	case <-isStop:
+		return stoppedErr
+	default:
+		return nil
+	}
 }
