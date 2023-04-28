@@ -48,3 +48,8 @@ Event数据，处理服务器根据情况自行解析即可
 而本次未配置的Collection，会自动停止与其相关的所有Sync或者ChangeStream
 任务
 
+### client-cli
+1、使用client 命名即可启动client-cli与服务程序通信   
+2、连接成功后，即可通信   
+3、client-cli的退出(使用 ctrl+c)，不影响服务程序的运行   
+
