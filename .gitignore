@@ -16,3 +16,4 @@
 .idea
 leveldb/stream_test_db
 out
+/output

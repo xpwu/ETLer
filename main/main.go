@@ -9,18 +9,14 @@ import (
 	"github.com/xpwu/go-cmd/exe"
 )
 
-func main()  {
-	cmd.RegisterCmd(cmd.DefaultCmdName, "start etler", func(args *arg.Arg) {
+func main() {
+	cmd.RegisterKeepAliveCmd(cmd.DefaultCmdName, "start etler", func(args *arg.Arg) {
 
-		arg.ReadConfig(args)
-		args.Parse()
+		arg.HookReadConfigTo(args)
+		args.ParseAndRunHook()
 
 		leveldb.Init(exe.Exe.AbsDir)
 		etl.Start()
-
-		// block
-		block := make(chan struct{})
-		<-block
 	})
 
 	cmd.Run()

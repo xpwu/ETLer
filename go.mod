@@ -5,7 +5,7 @@ go 1.17
 require (
 	github.com/stretchr/testify v1.6.1
 	github.com/syndtr/goleveldb v1.0.0
-	github.com/xpwu/go-cmd v0.2.0
+	github.com/xpwu/go-cmd v0.3.0
 	github.com/xpwu/go-config v0.1.0
 	github.com/xpwu/go-db-mongo v0.1.0
 	github.com/xpwu/go-httpclient v0.1.2
