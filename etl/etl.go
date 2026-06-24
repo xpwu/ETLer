@@ -6,19 +6,18 @@ import (
 )
 
 type listener struct {
-
 }
 
-func (l *listener) ForceSync() {
+func (l *listener) NeedForceSync() {
 	task.PostForceSyncAndWait()
 }
 
-func (l *listener) StreamChanged() {
+func (l *listener) OnStreamChanged() {
 	task.PostRunTask()
 }
 
 func Start() {
 	changestream.SetListener(&listener{})
-	changestream.Start()
+	changestream.StartWatching()
 	task.Start()
 }

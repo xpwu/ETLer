@@ -18,11 +18,11 @@ type etl struct {
 	Deployment       mongocache.Config
 	FullDocument     bool `conf:",https://www.mongodb.com/docs/v4.2/changeStreams/#lookup-full-document-for-update-operations"`
 	WatchCollections []WatchInfo
-	SendToUrl        string
+	SendToUrls       []string `conf:",send in order until successful"`
 }
 
 var Etl = &etl{
-	SendToUrl:        "http://send/data/to",
+	SendToUrls:       []string{"http://send/data/to"},
 	FullDocument:     true,
 	WatchCollections: []WatchInfo{{}},
 	Deployment: mongocache.Config{

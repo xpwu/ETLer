@@ -42,7 +42,7 @@ type ns struct {
 type Request struct {
 	T Type
 	// T == ChangeStream, Ns = {DB: "", Coll: ""}
-	Ns ns
+	Ns   ns
 	Data []bson.Raw
 }
 
@@ -52,25 +52,41 @@ type Response struct {
 type http struct {
 }
 
-func (h *http) Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (ok bool) {
+func (h *http) doOne(ctx context.Context, r *Request, url string) (ok bool) {
 	ctx, logger := log.WithCtx(ctx)
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	logger.PushPrefix(fmt.Sprintf("send: %s, len(data): %d", ty, len(data)))
+	err := httpc.Send(ctx, url, httpc.WithStructBodyToJson(r))
+	if err != nil {
+		logger.Warning(err)
+		return false
+	}
+
+	return true
+}
+
+func (h *http) Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (ok bool) {
+	ctx, logger := log.WithCtx(ctx)
 	r := &Request{
-		T:    ty,
+		T: ty,
 		Ns: ns{
 			DB:   db,
 			Coll: coll,
 		},
 		Data: data,
 	}
-	err := httpc.Send(ctx, config.Etl.SendToUrl, httpc.WithStructBodyToJson(r))
-	if err != nil {
-		logger.Error(err)
-		return false
+	logger.PushPrefix(fmt.Sprintf("send: %s", ty))
+
+	for _, url := range config.Etl.SendToUrls {
+		logger.PushPrefix(fmt.Sprintf("to: %s", url))
+		if h.doOne(ctx, r, url) {
+			return true
+		}
+		logger.PopPrefix()
 	}
 
-	return true
+	logger.Error("failed")
+
+	return false
 }

@@ -13,16 +13,19 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func Start() {
+func StartWatching() {
+	if listener == nil {
+		panic("not set listener")
+	}
 	x.AutoRestart(context.TODO(), "change-stream", startAndBlock)
 }
 
 type Listener interface {
-	ForceSync()
-	StreamChanged()
+	NeedForceSync()
+	OnStreamChanged()
 }
 
-var listener Listener
+var listener Listener = nil
 
 func SetListener(l Listener) {
 	listener = l
@@ -45,10 +48,10 @@ func startAndBlock(ctx context.Context) {
 		if !needWatch {
 			panic("resume watch error")
 		}
-		logger.Error("resume watch failed, will try no-resume watch")
+		logger.Error("resume watch failed, will try not-resume watch")
 	}
 
-	csr.noResumeWatch()
+	csr.notResumeWatch()
 }
 
 type changeStreamRunner struct {
@@ -114,7 +117,7 @@ func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
 
 	db.Cache().SaveResumeToken(csr.ctx, cs.ResumeToken())
 
-	listener.StreamChanged()
+	listener.OnStreamChanged()
 
 	return nil
 }
@@ -163,7 +166,7 @@ func (csr *changeStreamRunner) resumeWatch(token db.ResumeToken) (needWatch bool
 	return first
 }
 
-func (csr *changeStreamRunner) noResumeWatch() {
+func (csr *changeStreamRunner) notResumeWatch() {
 	ctx, logger := log.WithCtx(csr.ctx)
 	logger.PushPrefix("no-resume watch.")
 
@@ -175,7 +178,7 @@ func (csr *changeStreamRunner) noResumeWatch() {
 		panic(err)
 	}
 
-	listener.ForceSync()
+	listener.NeedForceSync()
 
 	db.Cache().SaveResumeToken(csr.ctx, cs.ResumeToken())
 
