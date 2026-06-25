@@ -6,7 +6,7 @@ import (
 	"github.com/xpwu/go-cmd/arg"
 	"github.com/xpwu/go-cmd/cmd"
 	_ "github.com/xpwu/go-cmd/cmd/printconf"
-	"github.com/xpwu/go-cmd/exe"
+	"github.com/xpwu/go-x/exe"
 )
 
 func main() {
@@ -15,7 +15,7 @@ func main() {
 		arg.HookReadConfigTo(args)
 		args.ParseAndRunHook()
 
-		leveldb.Init(exe.Exe.AbsDir)
+		leveldb.Init(exe.AbsDir)
 		etl.Start()
 	})
 

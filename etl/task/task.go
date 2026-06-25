@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/ETLer/etl/db"
-	"github.com/xpwu/ETLer/etl/x"
+	"github.com/xpwu/go-cmd/x"
 	"github.com/xpwu/go-db-mongo/mongodb/mongocache"
 	"github.com/xpwu/go-log/log"
 	"go.mongodb.org/mongo-driver/bson"
