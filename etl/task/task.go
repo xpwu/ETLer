@@ -276,7 +276,7 @@ func (t *taskRunner) run(stop <-chan struct{}) {
 		}
 	}
 
-	err := t.changeStream(stop)
+	err := t.sendChangeStream(stop)
 	if err == senderErr || err == stoppedErr {
 		return
 	}
@@ -391,7 +391,7 @@ func (t *taskRunner) sync(stop <-chan struct{}) error {
 	return nil
 }
 
-func (t *taskRunner) changeStream(stop <-chan struct{}) error {
+func (t *taskRunner) sendChangeStream(stop <-chan struct{}) error {
 	ctx, logger := log.WithCtx(t.ctx)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -409,33 +409,35 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 		}
 	}()
 
-	streamId, ok := db.Cache().SentStreamId(ctx)
+	sendId, ok := db.Cache().SentStreamId(ctx)
 	values := make([]db.StreamValue, 0, batch)
 	var iter db.StreamIterator
 	if ok {
-		iter = db.Stream().StartWith(ctx, streamId)
+		iter = db.Stream().StartWith(ctx, sendId)
 	} else {
 		iter = db.Stream().All(ctx)
 	}
 	defer iter.Release()
 
+	var lastId db.StreamId
+
 	if ok {
-		var newId db.StreamId
-		newId, _, ok = iter.First(ctx)
+		firstId, _, ok := iter.First(ctx)
 
 		// 之前发送过的stream 已经不能在stream找到，说明中间有断层，必须force sync
-		if string(newId) != string(streamId) {
+		if !ok || string(firstId) != string(sendId) {
+			logger.Warning("The stream sending point in the etler cache cannot be restored, force full sync.")
 			PostForceSync()
 			return nil
 		}
 
-		values, streamId, ok = iter.Next(ctx, 1)
+		values, lastId, ok = iter.Next(ctx, 1)
 		if !ok {
 			return nil
 		}
 	} else {
 		var value db.StreamValue
-		streamId, value, ok = iter.First(ctx)
+		lastId, value, ok = iter.First(ctx)
 
 		if !ok {
 			logger.Info("sendChangeStream: has not stream to send")
@@ -454,8 +456,8 @@ func (t *taskRunner) changeStream(stop <-chan struct{}) error {
 			return senderErr
 		}
 
-		db.Cache().SaveSentStreamId(ctx, streamId)
-		values, streamId, ok = iter.Next(ctx, batch)
+		db.Cache().SaveSentStreamId(ctx, lastId)
+		values, lastId, ok = iter.Next(ctx, batch)
 	}
 
 	return nil
