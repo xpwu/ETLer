@@ -12,12 +12,12 @@ import (
 
 func runClientCli(ctx context.Context) {
 	clientcli.Listen(ctx, "sync", "force sync a collection", func(args *arg.Arg) clientcli.Response {
-		_,logger := log.WithCtx(ctx)
+		_, logger := log.WithCtx(ctx)
 
 		d, coll := "<db>", "<coll>"
 		args.String(&d, "d", "db")
 		args.String(&coll, "c", "collection")
-		err := args.ParseErr()
+		err := args.ParseAndRunHookErr()
 		if err != nil {
 			if err == flag.ErrHelp {
 				return ""
@@ -38,5 +38,3 @@ func runClientCli(ctx context.Context) {
 		return "OK!"
 	})
 }
-
-
