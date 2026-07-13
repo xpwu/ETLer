@@ -2,11 +2,13 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/go-httpclient/httpc"
 	"github.com/xpwu/go-log/log"
 	"go.mongodb.org/mongo-driver/bson"
+	"net/url"
 	"time"
 )
 
@@ -28,8 +30,13 @@ const (
 	ChangeStream
 )
 
+var (
+	canceledErr   = context.Canceled
+	sendFailedErr = errors.New("send failed")
+)
+
 type Proxy interface {
-	Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (ok bool)
+	Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (err error)
 }
 
 var Sender Proxy = &http{}
@@ -52,21 +59,21 @@ type Response struct {
 type http struct {
 }
 
-func (h *http) doOne(ctx context.Context, r *Request, url string) (ok bool) {
+func (h *http) doOne(ctx context.Context, r *Request, url string) (err error) {
 	ctx, logger := log.WithCtx(ctx)
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	err := httpc.Send(ctx, url, httpc.WithStructBodyToJson(r))
+	err = httpc.Send(ctx, url, httpc.WithStructBodyToJson(r))
 	if err != nil {
 		logger.Warning(err)
-		return false
+		return
 	}
 
-	return true
+	return
 }
 
-func (h *http) Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (ok bool) {
+func (h *http) Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (err error) {
 	ctx, logger := log.WithCtx(ctx)
 	r := &Request{
 		T: ty,
@@ -78,15 +85,23 @@ func (h *http) Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw
 	}
 	logger.PushPrefix(fmt.Sprintf("send: %s", ty))
 
-	for _, url := range config.Etl.SendToUrls {
-		logger.PushPrefix(fmt.Sprintf("to: %s", url))
-		if h.doOne(ctx, r, url) {
-			return true
+	for _, url_ := range config.Etl.SendToUrls {
+		logger.PushPrefix(fmt.Sprintf("to: %s", url_))
+		err = h.doOne(ctx, r, url_)
+		if e, ok := err.(*url.Error); ok && e.Timeout() {
+			time.Sleep(1 * time.Second)
+			err = h.doOne(ctx, r, url_)
+		}
+		if ctx.Err() == context.Canceled {
+			return canceledErr
+		}
+		if err == nil {
+			return
 		}
 		logger.PopPrefix()
 	}
 
 	logger.Error("failed")
 
-	return false
+	return sendFailedErr
 }
