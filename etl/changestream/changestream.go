@@ -14,21 +14,34 @@ import (
 )
 
 func StartWatching() {
-	if listener == nil {
-		panic("not set listener")
-	}
 	x.AutoRestart(context.TODO(), "change-stream", startAndBlock)
 }
 
-type Listener interface {
-	NeedForceSync()
-	OnStreamChanged()
+var (
+	syncChan      = make(chan struct{}, 1)
+	newStreamChan = make(chan struct{}, 1)
+)
+
+func NeedForceSync() <-chan struct{} {
+	return syncChan
 }
 
-var listener Listener = nil
+func OnStreamChanged() <-chan struct{} {
+	return newStreamChan
+}
 
-func SetListener(l Listener) {
-	listener = l
+func postNeedForceSync() {
+	select {
+	case syncChan <- struct{}{}:
+	default:
+	}
+}
+
+func postStreamChanged() {
+	select {
+	case newStreamChan <- struct{}{}:
+	default:
+	}
 }
 
 func startAndBlock(ctx context.Context) {
@@ -117,7 +130,7 @@ func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
 
 	db.Cache().SaveResumeToken(csr.ctx, cs.ResumeToken())
 
-	listener.OnStreamChanged()
+	postStreamChanged()
 
 	return nil
 }
@@ -178,7 +191,7 @@ func (csr *changeStreamRunner) notResumeWatch() {
 		panic(err)
 	}
 
-	listener.NeedForceSync()
+	postNeedForceSync()
 
 	db.Cache().SaveResumeToken(csr.ctx, cs.ResumeToken())
 
