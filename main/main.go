@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/xpwu/ETLer/clientcli"
 	"github.com/xpwu/ETLer/etl"
 	"github.com/xpwu/ETLer/leveldb"
 	"github.com/xpwu/go-cmd/arg"
@@ -17,6 +18,7 @@ func main() {
 
 		leveldb.Init(exe.AbsDir)
 		etl.Start()
+		clientcli.Start()
 	})
 
 	cmd.Run()
