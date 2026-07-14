@@ -16,9 +16,9 @@ func (w WatchInfo) Id() string {
 
 type etl struct {
 	Deployment       mongocache.Config
-	FullDocument     bool `conf:",https://www.mongodb.com/docs/v4.2/changeStreams/#lookup-full-document-for-update-operations"`
-	WatchCollections []WatchInfo
-	SendToUrls       []string `conf:",send in order until successful"`
+	FullDocument     bool        `conf:",https://www.mongodb.com/docs/v4.2/changeStreams/#lookup-full-document-for-update-operations"`
+	WatchCollections []WatchInfo `conf:",init the WatchCollections"`
+	SendToUrls       []string    `conf:",send in order until successful"`
 }
 
 var Etl = &etl{
