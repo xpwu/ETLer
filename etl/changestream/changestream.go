@@ -126,11 +126,12 @@ func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
 	if csr.watchColl[cid] {
 		logger.Info("save change stream: ", ce.String())
 		db.Stream().Save(csr.ctx, cs.ResumeToken(), cs.Current)
+		postStreamChanged()
+	} else {
+		logger.Debug(ce.String(), " is NOT in the WatchCollections, so it's discarded")
 	}
 
 	db.Cache().SaveResumeToken(csr.ctx, cs.ResumeToken())
-
-	postStreamChanged()
 
 	return nil
 }
