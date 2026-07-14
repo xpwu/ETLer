@@ -12,23 +12,22 @@ import (
 )
 
 type Runner struct {
-	rawCtx  context.Context
-	ctx     context.Context
-	client  *mongocache.Client
-	stopped chan struct{}
-	cancel  chan context.CancelFunc
-	logger  *log.Logger
-	batch   int
-	failed  chan RunnerFailedCode
+	rawCtx   context.Context
+	ctx      context.Context
+	client   *mongocache.Client
+	cancel   chan context.CancelFunc
+	logger   *log.Logger
+	batch    int
+	doneChan chan RunnerCode
+	addOne   chan struct{}
 }
 
 func NewRunner(ctx context.Context, client *mongocache.Client, batch int) *Runner {
 	r := &Runner{
-		client:  client,
-		stopped: make(chan struct{}, 1),
-		cancel:  make(chan context.CancelFunc, 1),
-		batch:   batch,
-		failed:  make(chan RunnerFailedCode, 1),
+		client:   client,
+		cancel:   make(chan context.CancelFunc, 1),
+		batch:    batch,
+		doneChan: make(chan RunnerCode, 1),
 	}
 
 	r.rawCtx, r.logger = log.WithCtx(ctx)
@@ -39,16 +38,18 @@ func NewRunner(ctx context.Context, client *mongocache.Client, batch int) *Runne
 	return r
 }
 
-type RunnerFailedCode int
+type RunnerCode int
 
 const (
-	Unknown RunnerFailedCode = iota
+	Ok RunnerCode = iota
+	ByStopped
 	NeedForceSync
 	SendFailed
+	UnknownErr
 )
 
-func (r *Runner) OnFailed() <-chan RunnerFailedCode {
-	return r.failed
+func (r *Runner) Done() <-chan RunnerCode {
+	return r.doneChan
 }
 
 var (
@@ -67,52 +68,51 @@ func (r *Runner) cancelSafely() (hasCancel bool) {
 	}
 }
 
+func (r *Runner) done(code RunnerCode) {
+	select {
+	case r.doneChan <- code:
+	default:
+	}
+}
+
 // Start 时序很重要，sync 与 send change stream 都是串行处理，每一批也都是串行处理，即使是停止，也必须等待停止后，才能新启动
 // 一定是先 sync 再 send change stream
 // Start 与 Stop 不是并发安全的
-func (r *Runner) Start() {
+func (r *Runner) Start() (isBusy bool) {
 	ctx, cancel := context.WithCancel(r.rawCtx)
 	select {
 	case r.cancel <- cancel:
 	default:
 		// running
+		isBusy = true
 		return
 	}
 	r.ctx = ctx
 
 	go func() {
-
 		err := r.sync()
 		if err == nil {
 			err = r.sendChangeStream()
 		}
 
+		// clear cancel chan
 		r.cancelSafely()
-		select {
-		case r.stopped <- struct{}{}:
-		default:
-		}
 
 		switch err {
 		case senderErr:
-			select {
-			case r.failed <- SendFailed:
-			default:
-			}
+			r.done(SendFailed)
 		case lastStreamNotFoundErr:
-			select {
-			case r.failed <- NeedForceSync:
-			default:
-			}
+			r.done(NeedForceSync)
 		case stoppedErr:
+			r.done(ByStopped)
 		case nil:
+			r.done(Ok)
 		default:
-			select {
-			case r.failed <- Unknown:
-			default:
-			}
+			r.done(UnknownErr)
 		}
 	}()
+
+	return false
 }
 
 // Stop 与 Start 不是并发安全的
@@ -120,7 +120,7 @@ func (r *Runner) Stop() {
 	if r.cancelSafely() {
 		r.logger.Info("will stop")
 		// wait stopped
-		<-r.stopped
+		<-r.Done()
 	}
 }
 

@@ -1,16 +1,19 @@
-package task
+package clientcli
 
 import (
 	"context"
 	"flag"
 	"fmt"
 	"github.com/xpwu/ETLer/etl/config"
+	"github.com/xpwu/ETLer/etl/db"
+	"github.com/xpwu/ETLer/etl/task"
 	"github.com/xpwu/go-cmd/arg"
 	"github.com/xpwu/go-cmd/clientcli"
 	"github.com/xpwu/go-log/log"
 )
 
-func runClientCli(ctx context.Context) {
+func Start() {
+	ctx := context.TODO()
 	clientcli.Listen(ctx, "sync", "force sync a collection", func(args *arg.Arg) clientcli.Response {
 		_, logger := log.WithCtx(ctx)
 
@@ -27,12 +30,24 @@ func runClientCli(ctx context.Context) {
 
 		logger.Debug(fmt.Sprintf("client-cli: sync %s.%s", d, coll))
 
-		err = SyncATask(&config.WatchInfo{
+		add := config.WatchInfo{
 			DB:         d,
 			Collection: coll,
-		})
-		if err != nil {
-			return "ERROR: " + err.Error()
+		}
+
+		all := db.WatchCollection().All(ctx)
+		m := make(map[string]bool)
+		for _, c := range all {
+			m[c.Id()] = true
+		}
+
+		if !m[add.Id()] {
+			return "ERROR: " + d + "." + coll + "is NOT in the Watch Collections"
+		}
+
+		task.SyncTaskUpdater() <- task.SyncTaskDiff{
+			Add: []config.WatchInfo{add},
+			Del: []config.WatchInfo{},
 		}
 
 		return "OK!"
