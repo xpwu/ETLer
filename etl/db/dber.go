@@ -34,6 +34,7 @@ type StreamDBer interface {
 const ConfigVersion = 0
 
 type WatchCollectionDBer interface {
+	// All latest version WatchInfos
 	All(ctx context.Context) []config.WatchInfo
 	Save(ctx context.Context, w []config.WatchInfo, version int)
 	LatestVersion(ctx context.Context) int

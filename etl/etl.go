@@ -24,6 +24,11 @@ func Start() {
 	task.Start()
 }
 
+func WatchCollectionUpdated() {
+	task.WatchCollectionUpdated()
+	changestream.WatchCollectionUpdated()
+}
+
 func initTaskFromConfig(ctx context.Context) (succeed bool) {
 	ctx, logger := log.WithCtx(ctx)
 	defer func() {

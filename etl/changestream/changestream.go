@@ -18,8 +18,9 @@ func StartWatching() {
 }
 
 var (
-	syncChan      = make(chan struct{}, 1)
-	newStreamChan = make(chan struct{}, 1)
+	syncChan               = make(chan struct{}, 1)
+	newStreamChan          = make(chan struct{}, 1)
+	watchCollectionUpdated = make(chan struct{}, 1)
 )
 
 func NeedForceSync() <-chan struct{} {
@@ -28,6 +29,13 @@ func NeedForceSync() <-chan struct{} {
 
 func OnStreamChanged() <-chan struct{} {
 	return newStreamChan
+}
+
+func WatchCollectionUpdated() {
+	select {
+	case watchCollectionUpdated <- struct{}{}:
+	default:
+	}
 }
 
 func postNeedForceSync() {
@@ -45,7 +53,22 @@ func postStreamChanged() {
 }
 
 func startAndBlock(ctx context.Context) {
+	select {
+	case <-watchCollectionUpdated:
+	default:
+	}
+
 	ctx, logger := log.WithCtx(ctx)
+	ctx, cancel := context.WithCancel(ctx)
+
+	go func() {
+		select {
+		case <-watchCollectionUpdated:
+			// stop watching stream, and wait for restarting
+			cancel()
+			logger.Debug("WatchCollection is updated, wait for restarting")
+		}
+	}()
 
 	client, err := mongocache.Get(ctx, config.Etl.Deployment)
 	if err != nil {

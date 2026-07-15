@@ -24,11 +24,19 @@ type SyncTaskDiff struct {
 }
 
 var (
-	updateSyncTaskChan = make(chan SyncTaskDiff)
+	updateSyncTaskChan     = make(chan SyncTaskDiff)
+	watchCollectionUpdated = make(chan struct{}, 1)
 )
 
 func SyncTaskUpdater() chan<- SyncTaskDiff {
 	return updateSyncTaskChan
+}
+
+func WatchCollectionUpdated() {
+	select {
+	case watchCollectionUpdated <- struct{}{}:
+	default:
+	}
 }
 
 func Start() {
@@ -36,6 +44,15 @@ func Start() {
 }
 
 func startAndBlock(ctx context.Context) {
+	select {
+	case <-watchCollectionUpdated:
+	default:
+	}
+	select {
+	case <-updateSyncTaskChan:
+	default:
+	}
+
 	ctx, logger := log.WithCtx(ctx)
 	client, err := mongocache.Get(ctx, config.Etl.Deployment)
 	if err != nil {
@@ -43,7 +60,7 @@ func startAndBlock(ctx context.Context) {
 		panic(err)
 	}
 
-	// todo: checkSyncTask()
+	updateWatchCollectionAndTask(ctx)
 
 	runner := NewRunner(ctx, client, batch)
 
@@ -77,6 +94,10 @@ func startAndBlock(ctx context.Context) {
 		case d := <-updateSyncTaskChan:
 			runner.Stop()
 			updateSyncTask(ctx, d.Add, d.Del)
+			runner.Start()
+		case <-watchCollectionUpdated:
+			runner.Stop()
+			updateWatchCollectionAndTask(ctx)
 			runner.Start()
 		}
 	}
@@ -115,4 +136,8 @@ func MinKeyTask(info config.WatchInfo) db.Task {
 		StartDocId: serialize(bson.RawValue{Type: bsontype.MinKey}),
 		WatchInfo:  info,
 	}
+}
+
+func updateWatchCollectionAndTask(ctx context.Context) {
+
 }
