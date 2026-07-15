@@ -43,7 +43,6 @@ func startAndBlock(ctx context.Context) {
 		panic(err)
 	}
 
-	initTaskFromConfig(ctx)
 	// todo: checkSyncTask()
 
 	runner := NewRunner(ctx, client, batch)
@@ -92,39 +91,6 @@ func addAllSyncTask(ctx context.Context) {
 
 	db.SyncTask().DelAll(ctx)
 	db.SyncTask().InsertOrUpdateBatch(ctx, add)
-}
-
-func initTaskFromConfig(ctx context.Context) {
-	newM := make(map[string]config.WatchInfo)
-	for _, info := range config.Etl.WatchCollections {
-		newM[info.Id()] = info
-	}
-
-	old := make(map[string]config.WatchInfo)
-	for _, info := range db.WatchCollection().All(ctx) {
-		old[info.Id()] = info
-	}
-
-	add := make([]db.Task, 0, len(newM))
-	for id, info := range newM {
-		_, has := old[id]
-		if !has {
-			add = append(add, MinKeyTask(info))
-		}
-	}
-	db.SyncTask().InsertOrUpdateBatch(ctx, add)
-
-	del := make([]string, 0, len(old))
-	for id, info := range old {
-		_, has := newM[id]
-		if !has {
-			del = append(del, info.Id())
-		}
-	}
-	db.SyncTask().DelBatch(ctx, del)
-
-	// 必须最后保存此项，防止前面异常出错
-	db.WatchCollection().Save(ctx, config.Etl.WatchCollections)
 }
 
 func updateSyncTask(ctx context.Context, add []config.WatchInfo, del []config.WatchInfo) {

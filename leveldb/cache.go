@@ -102,11 +102,15 @@ func (c *cache) All(ctx context.Context) []config.WatchInfo {
 	return fromJson(r)
 }
 
-func (c *cache) Save(ctx context.Context, i []config.WatchInfo) {
+func (c *cache) Save(ctx context.Context, i []config.WatchInfo, version int) {
 	err := c.db.Put([]byte(watchCollKey), toJson(i), nil)
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (c *cache) LatestVersion(ctx context.Context) int {
+	return db.ConfigVersion
 }
 
 func newCache(root string) *cache {

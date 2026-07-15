@@ -31,9 +31,12 @@ type StreamDBer interface {
 	GetLastOne(ctx context.Context) (id StreamId, ok bool)
 }
 
+const ConfigVersion = 0
+
 type WatchCollectionDBer interface {
 	All(ctx context.Context) []config.WatchInfo
-	Save(ctx context.Context, w []config.WatchInfo)
+	Save(ctx context.Context, w []config.WatchInfo, version int)
+	LatestVersion(ctx context.Context) int
 }
 
 type Task struct {
