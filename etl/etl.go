@@ -29,6 +29,7 @@ func WatchCollectionUpdated() {
 	changestream.WatchCollectionUpdated()
 }
 
+// todo  config 与 WatchCollection 之间的增量更新
 func initTaskFromConfig(ctx context.Context) (succeed bool) {
 	ctx, logger := log.WithCtx(ctx)
 	defer func() {
@@ -49,7 +50,8 @@ func initTaskFromConfig(ctx context.Context) (succeed bool) {
 	}
 
 	old := make(map[string]config.WatchInfo)
-	for _, info := range db.WatchCollection().All(ctx) {
+	all, _ := db.WatchCollection().Latest(ctx)
+	for _, info := range all {
 		old[info.Id()] = info
 	}
 

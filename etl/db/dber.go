@@ -34,10 +34,20 @@ type StreamDBer interface {
 const ConfigVersion = 0
 
 type WatchCollectionDBer interface {
-	// All latest version WatchInfos
-	All(ctx context.Context) []config.WatchInfo
-	Save(ctx context.Context, w []config.WatchInfo, version int)
+	// --- 以下接口需要支持并发 ---
+
+	// Latest version = the latest one
+	Latest(ctx context.Context) (wc []config.WatchInfo, version int)
 	LatestVersion(ctx context.Context) int
+	// Save latestVersion >= version 什么也不改变
+	Save(ctx context.Context, w []config.WatchInfo, version int) (latestVersion int)
+
+	// --- 以下接口不需支持并发 ---
+
+	LatestTaskified(ctx context.Context) (wc []config.WatchInfo, version int)
+	// LatestTaskifying 返回正在Taskify的版本数据 或者 需要Taskify的版本数据并同时标记为Taskifying
+	LatestTaskifying(ctx context.Context) (wc []config.WatchInfo, version int)
+	SetTaskified(ctx context.Context, version int)
 }
 
 type Task struct {

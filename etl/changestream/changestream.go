@@ -103,7 +103,8 @@ func newCsr(ctx context.Context, client *mongocache.Client) *changeStreamRunner 
 		watchColl: make(map[string]bool),
 	}
 
-	for _, c := range db.WatchCollection().All(ctx) {
+	all, _ := db.WatchCollection().Latest(ctx)
+	for _, c := range all {
 		r.watchColl[c.Id()] = true
 	}
 

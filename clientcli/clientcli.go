@@ -35,7 +35,7 @@ func Start() {
 			Collection: coll,
 		}
 
-		all := db.WatchCollection().All(ctx)
+		all, _ := db.WatchCollection().Latest(ctx)
 		m := make(map[string]bool)
 		for _, c := range all {
 			m[c.Id()] = true

@@ -60,7 +60,7 @@ func startAndBlock(ctx context.Context) {
 		panic(err)
 	}
 
-	updateWatchCollectionAndTask(ctx)
+	updateTaskFromWatchCollection(ctx)
 
 	runner := NewRunner(ctx, client, batch)
 
@@ -97,26 +97,13 @@ func startAndBlock(ctx context.Context) {
 			runner.Start()
 		case <-watchCollectionUpdated:
 			runner.Stop()
-			updateWatchCollectionAndTask(ctx)
+			updateTaskFromWatchCollection(ctx)
 			runner.Start()
 		}
 	}
 }
 
-func addAllSyncTask(ctx context.Context) {
-	collections := db.WatchCollection().All(ctx)
-	add := make([]db.Task, 0, len(collections))
-	for _, info := range collections {
-		add = append(add, MinKeyTask(info))
-	}
-
-	db.SyncTask().DelAll(ctx)
-	db.SyncTask().InsertOrUpdateBatch(ctx, add)
-}
-
 func updateSyncTask(ctx context.Context, add []config.WatchInfo, del []config.WatchInfo) {
-	//collections := db.WatchCollection().All(ctx)
-
 	addT := make([]db.Task, 0, len(add))
 	for _, info := range add {
 		addT = append(addT, MinKeyTask(info))
@@ -138,7 +125,20 @@ func MinKeyTask(info config.WatchInfo) db.Task {
 	}
 }
 
-func updateWatchCollectionAndTask(ctx context.Context) {
+// todo WatchCollection -> task 可能做一半 crash 了，后续如何补做?
+
+func addAllSyncTask(ctx context.Context) {
+	collections, version := db.WatchCollection().Latest(ctx)
+	add := make([]db.Task, 0, len(collections))
+	for _, info := range collections {
+		add = append(add, MinKeyTask(info))
+	}
+
+	db.SyncTask().DelAll(ctx)
+	db.SyncTask().InsertOrUpdateBatch(ctx, add)
+}
+
+func updateTaskFromWatchCollection(ctx context.Context) {
 	// todo
 	// 0、finished ?
 	// 1、diff
