@@ -139,5 +139,10 @@ func MinKeyTask(info config.WatchInfo) db.Task {
 }
 
 func updateWatchCollectionAndTask(ctx context.Context) {
-
+	// todo
+	// 0、finished ?
+	// 1、diff
+	// 2、add task
+	// *3、delete all of less than the latest version
+	// 4、set finish flag
 }
