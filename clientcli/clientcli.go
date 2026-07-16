@@ -35,7 +35,7 @@ func Start() {
 			Collection: coll,
 		}
 
-		all, _ := db.WatchCollection().Latest(ctx)
+		all := db.WatchCollection().Get(ctx, db.WatchCollection().LatestVersion(ctx))
 		m := make(map[string]bool)
 		for _, c := range all {
 			m[c.Id()] = true
@@ -45,7 +45,7 @@ func Start() {
 			return "ERROR: " + d + "." + coll + "is NOT in the Watch Collections"
 		}
 
-		task.SyncTaskUpdater() <- task.SyncTaskDiff{
+		task.SyncTaskUpdater() <- task.SyncTaskDelta{
 			Add: []config.WatchInfo{add},
 			Del: []config.WatchInfo{},
 		}

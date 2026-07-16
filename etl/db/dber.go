@@ -33,21 +33,33 @@ type StreamDBer interface {
 
 const ConfigVersion = 0
 
-type WatchCollectionDBer interface {
-	// --- 以下接口需要支持并发 ---
-
+// WCAccessor 需要支持并发
+type WCAccessor interface {
 	// Latest version = the latest one
-	Latest(ctx context.Context) (wc []config.WatchInfo, version int)
+	//Latest(ctx context.Context) (wc []config.WatchInfo, version int)
+
 	LatestVersion(ctx context.Context) int
 	// Save latestVersion >= version 什么也不改变
 	Save(ctx context.Context, w []config.WatchInfo, version int) (latestVersion int)
+	Get(ctx context.Context, version int) []config.WatchInfo
+	DelLessThan(ctx context.Context, version int)
+}
 
-	// --- 以下接口不需支持并发 ---
+// WCTaskifier 无需支持并发
+type WCTaskifier interface {
+	NeedFullSyncing(ctx context.Context) bool
+	MarkFullSyncing(ctx context.Context)
 
-	LatestTaskified(ctx context.Context) (wc []config.WatchInfo, version int)
-	// LatestTaskifying 返回正在Taskify的版本数据 或者 需要Taskify的版本数据并同时标记为Taskifying
-	LatestTaskifying(ctx context.Context) (wc []config.WatchInfo, version int)
-	SetTaskified(ctx context.Context, version int)
+	NeedDeltaSyncing(ctx context.Context) (version int, need bool)
+	DeltaSyncing(ctx context.Context, version int)
+
+	ClearSyncingAndMarkSynced(ctx context.Context, version int)
+	LatestSynced(ctx context.Context) (version int)
+}
+
+type WatchCollectionDBer interface {
+	WCAccessor
+	WCTaskifier
 }
 
 type Task struct {
@@ -63,6 +75,7 @@ type SyncTaskIterator interface {
 	Release()
 }
 
+// SyncTaskDBer 不保证并发安全
 type SyncTaskDBer interface {
 	All(ctx context.Context) SyncTaskIterator
 
