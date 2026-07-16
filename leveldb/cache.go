@@ -3,7 +3,6 @@ package leveldb
 import (
 	"context"
 	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/ETLer/etl/db"
 	"path"
 )
@@ -15,7 +14,6 @@ type cache struct {
 const (
 	resumeKey     = "resume"
 	sentStreamKey = "sentstream"
-	watchCollKey  = "watchcoll"
 )
 
 func (c *cache) ResumeToken(ctx context.Context) (token db.ResumeToken, ok bool) {
@@ -63,32 +61,6 @@ func (c *cache) SaveSentStreamId(ctx context.Context, id db.StreamId) {
 	if err != nil {
 		panic(err)
 	}
-}
-
-type wi struct {
-	D []config.WatchInfo
-}
-
-func (c *cache) All(ctx context.Context) []config.WatchInfo {
-	r, err := c.db.Get([]byte(watchCollKey), nil)
-	if err == leveldb.ErrNotFound {
-		return []config.WatchInfo{}
-	}
-
-	if err != nil {
-		panic(err)
-	}
-
-	return fromJson(r)
-}
-
-func (c *cache) Save(ctx context.Context, i []config.WatchInfo) {
-	err := c.db.Put([]byte(watchCollKey), toJson(i), nil)
-	if err != nil {
-		panic(err)
-	}
-
-	return
 }
 
 func newCache(root string) *cache {

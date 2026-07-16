@@ -5,7 +5,8 @@ import (
 	"github.com/xpwu/ETLer/etl/changestream"
 	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/ETLer/etl/db"
-	"github.com/xpwu/go-cmd/x"
+	"github.com/xpwu/ETLer/x"
+	cmdX "github.com/xpwu/go-cmd/x"
 	"github.com/xpwu/go-db-mongo/mongodb/mongocache"
 	"github.com/xpwu/go-log/log"
 	"go.mongodb.org/mongo-driver/bson"
@@ -19,8 +20,8 @@ const (
 )
 
 type SyncTaskDelta struct {
-	Add []config.WatchInfo
-	Del []config.WatchInfo
+	Add []x.WatchInfo
+	Del []x.WatchInfo
 }
 
 var (
@@ -40,7 +41,7 @@ func WatchCollectionUpdated() {
 }
 
 func Start() {
-	x.AutoRestart(context.TODO(), "send-task", startAndBlock)
+	cmdX.AutoRestart(context.TODO(), "send-task", startAndBlock)
 }
 
 func startAndBlock(ctx context.Context) {
@@ -103,26 +104,26 @@ func startAndBlock(ctx context.Context) {
 	}
 }
 
-func MinKeyTask(info config.WatchInfo) db.Task {
+func MinKeyTask(info x.WatchInfo) db.Task {
 	return db.Task{
 		StartDocId: serialize(bson.RawValue{Type: bsontype.MinKey}),
 		WatchInfo:  info,
 	}
 }
 
-func diffSyncTask(new []config.WatchInfo, old []config.WatchInfo) SyncTaskDelta {
+func diffSyncTask(new []x.WatchInfo, old []x.WatchInfo) SyncTaskDelta {
 
-	newM := make(map[string]config.WatchInfo)
+	newM := make(map[string]x.WatchInfo)
 	for _, info := range new {
 		newM[info.Id()] = info
 	}
 
-	oldM := make(map[string]config.WatchInfo)
+	oldM := make(map[string]x.WatchInfo)
 	for _, info := range old {
 		oldM[info.Id()] = info
 	}
 
-	add := make([]config.WatchInfo, 0, len(newM))
+	add := make([]x.WatchInfo, 0, len(newM))
 	for id, info := range newM {
 		_, has := oldM[id]
 		if !has {
@@ -130,7 +131,7 @@ func diffSyncTask(new []config.WatchInfo, old []config.WatchInfo) SyncTaskDelta 
 		}
 	}
 
-	del := make([]config.WatchInfo, 0, len(old))
+	del := make([]x.WatchInfo, 0, len(old))
 	for id, info := range oldM {
 		_, has := newM[id]
 		if !has {

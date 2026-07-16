@@ -4,9 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/ETLer/etl/db"
 	"github.com/xpwu/ETLer/etl/task"
+	"github.com/xpwu/ETLer/x"
 	"github.com/xpwu/go-cmd/arg"
 	"github.com/xpwu/go-cmd/clientcli"
 	"github.com/xpwu/go-log/log"
@@ -30,7 +30,7 @@ func Start() {
 
 		logger.Debug(fmt.Sprintf("client-cli: sync %s.%s", d, coll))
 
-		add := config.WatchInfo{
+		add := x.WatchInfo{
 			DB:         d,
 			Collection: coll,
 		}
@@ -46,8 +46,8 @@ func Start() {
 		}
 
 		task.SyncTaskUpdater() <- task.SyncTaskDelta{
-			Add: []config.WatchInfo{add},
-			Del: []config.WatchInfo{},
+			Add: []x.WatchInfo{add},
+			Del: []x.WatchInfo{},
 		}
 
 		return "OK!"

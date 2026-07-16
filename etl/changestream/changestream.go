@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/ETLer/etl/db"
-	"github.com/xpwu/go-cmd/x"
+	"github.com/xpwu/ETLer/x"
+	cmdX "github.com/xpwu/go-cmd/x"
 	"github.com/xpwu/go-db-mongo/mongodb/mongocache"
 	"github.com/xpwu/go-log/log"
 	"go.mongodb.org/mongo-driver/bson"
@@ -14,7 +15,7 @@ import (
 )
 
 func StartWatching() {
-	x.AutoRestart(context.TODO(), "change-stream", startAndBlock)
+	cmdX.AutoRestart(context.TODO(), "change-stream", startAndBlock)
 }
 
 var (
@@ -135,7 +136,7 @@ func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
 		return err
 	}
 
-	cid := config.WatchInfo{
+	cid := x.WatchInfo{
 		DB:         ce.Ns.Db,
 		Collection: ce.Ns.Coll,
 	}.Id()

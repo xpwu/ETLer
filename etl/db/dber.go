@@ -2,13 +2,13 @@ package db
 
 import (
 	"context"
-	"github.com/xpwu/ETLer/etl/config"
+	"github.com/xpwu/ETLer/x"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-type StreamId = []byte
+type StreamId = x.StreamId
 
-type StreamValue = bson.Raw
+type StreamValue = x.StreamValue
 
 type StreamIterator interface {
 	First(ctx context.Context) (id StreamId, value StreamValue, ok bool)
@@ -37,8 +37,8 @@ const ConfigVersion uint64 = 0
 type WCAccessor interface {
 	LatestVersion(ctx context.Context) uint64
 	// Save latestVersion >= version 什么也不改变
-	Save(ctx context.Context, w []config.WatchInfo, version uint64) (latestVersion uint64)
-	Get(ctx context.Context, version uint64) []config.WatchInfo
+	Save(ctx context.Context, w []x.WatchInfo, version uint64) (latestVersion uint64)
+	Get(ctx context.Context, version uint64) []x.WatchInfo
 	DelLessThan(ctx context.Context, version uint64)
 }
 
@@ -60,7 +60,7 @@ type WatchCollectionDBer interface {
 }
 
 type Task struct {
-	config.WatchInfo
+	x.WatchInfo
 
 	// _id
 	StartDocId []byte
