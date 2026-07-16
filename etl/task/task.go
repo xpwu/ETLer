@@ -205,13 +205,13 @@ func deltaSyncTaskify(ctx context.Context) {
 		return
 	}
 
-	latestWc := db.WatchCollection().Get(ctx, latestSynced)
+	latestSyncedWc := db.WatchCollection().Get(ctx, latestSynced)
 	if need {
 		syncingWc := db.WatchCollection().Get(ctx, syncing)
-		updateSyncTask(ctx, diffSyncTask(syncingWc, latestWc))
+		updateSyncTask(ctx, diffSyncTask(syncingWc, latestSyncedWc))
 		db.WatchCollection().ClearSyncingAndMarkSynced(ctx, syncing)
 		latestSynced = syncing
-		latestWc = syncingWc
+		latestSyncedWc = syncingWc
 	}
 
 	if latestSynced == latestVer {
@@ -220,8 +220,9 @@ func deltaSyncTaskify(ctx context.Context) {
 
 	db.WatchCollection().DeltaSyncing(ctx, latestVer)
 	latest := db.WatchCollection().Get(ctx, latestVer)
-	updateSyncTask(ctx, diffSyncTask(latest, latestWc))
+	updateSyncTask(ctx, diffSyncTask(latest, latestSyncedWc))
 	db.WatchCollection().ClearSyncingAndMarkSynced(ctx, latestVer)
+	db.WatchCollection().DelLessThan(ctx, latestVer)
 }
 
 func InitTaskFromConfig(ctx context.Context) (succeed bool) {

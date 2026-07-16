@@ -31,18 +31,15 @@ type StreamDBer interface {
 	GetLastOne(ctx context.Context) (id StreamId, ok bool)
 }
 
-const ConfigVersion = 0
+const ConfigVersion uint64 = 0
 
 // WCAccessor 需要支持并发
 type WCAccessor interface {
-	// Latest version = the latest one
-	//Latest(ctx context.Context) (wc []config.WatchInfo, version int)
-
-	LatestVersion(ctx context.Context) int
+	LatestVersion(ctx context.Context) uint64
 	// Save latestVersion >= version 什么也不改变
-	Save(ctx context.Context, w []config.WatchInfo, version int) (latestVersion int)
-	Get(ctx context.Context, version int) []config.WatchInfo
-	DelLessThan(ctx context.Context, version int)
+	Save(ctx context.Context, w []config.WatchInfo, version uint64) (latestVersion uint64)
+	Get(ctx context.Context, version uint64) []config.WatchInfo
+	DelLessThan(ctx context.Context, version uint64)
 }
 
 // WCTaskifier 无需支持并发
@@ -50,11 +47,11 @@ type WCTaskifier interface {
 	NeedFullSyncing(ctx context.Context) bool
 	MarkFullSyncing(ctx context.Context)
 
-	NeedDeltaSyncing(ctx context.Context) (version int, need bool)
-	DeltaSyncing(ctx context.Context, version int)
+	NeedDeltaSyncing(ctx context.Context) (version uint64, need bool)
+	DeltaSyncing(ctx context.Context, version uint64)
 
-	ClearSyncingAndMarkSynced(ctx context.Context, version int)
-	LatestSynced(ctx context.Context) (version int)
+	ClearSyncingAndMarkSynced(ctx context.Context, version uint64)
+	LatestSynced(ctx context.Context) (version uint64)
 }
 
 type WatchCollectionDBer interface {
