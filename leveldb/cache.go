@@ -2,7 +2,6 @@ package leveldb
 
 import (
 	"context"
-	"encoding/json"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/ETLer/etl/db"
@@ -70,25 +69,6 @@ type wi struct {
 	D []config.WatchInfo
 }
 
-func toJson(d []config.WatchInfo) []byte {
-	r, err := json.Marshal(&wi{D: d})
-	if err != nil {
-		panic(err)
-	}
-
-	return r
-}
-
-func fromJson(d []byte) []config.WatchInfo {
-	r := &wi{}
-	err := json.Unmarshal(d, r)
-	if err != nil {
-		panic(err)
-	}
-
-	return r.D
-}
-
 func (c *cache) All(ctx context.Context) []config.WatchInfo {
 	r, err := c.db.Get([]byte(watchCollKey), nil)
 	if err == leveldb.ErrNotFound {
@@ -102,15 +82,13 @@ func (c *cache) All(ctx context.Context) []config.WatchInfo {
 	return fromJson(r)
 }
 
-func (c *cache) Save(ctx context.Context, i []config.WatchInfo, version int) {
+func (c *cache) Save(ctx context.Context, i []config.WatchInfo) {
 	err := c.db.Put([]byte(watchCollKey), toJson(i), nil)
 	if err != nil {
 		panic(err)
 	}
-}
 
-func (c *cache) LatestVersion(ctx context.Context) int {
-	return db.ConfigVersion
+	return
 }
 
 func newCache(root string) *cache {

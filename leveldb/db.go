@@ -11,5 +11,5 @@ func Init(root string) {
 	db.SetCache(c)
 	db.SetStream(newStream(root))
 	db.SetSyncTask(newSyncTask(root))
-	db.SetWatchCollection(c)
+	db.SetWatchCollection(newWatchCollection(root))
 }
