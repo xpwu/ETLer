@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/xpwu/ETLer/etl/db"
+	"github.com/xpwu/ETLer/etl"
 	"github.com/xpwu/ETLer/etl/task"
 	"github.com/xpwu/ETLer/x"
 	"github.com/xpwu/go-cmd/arg"
@@ -30,23 +30,17 @@ func Start() {
 
 		logger.Debug(fmt.Sprintf("client-cli: sync %s.%s", d, coll))
 
-		add := x.WatchInfo{
+		add := []x.WatchInfo{{
 			DB:         d,
-			Collection: coll,
+			Collection: coll},
 		}
 
-		all := db.WatchCollection().Get(ctx, db.WatchCollection().LatestVersion(ctx))
-		m := make(map[string]bool)
-		for _, c := range all {
-			m[c.Id()] = true
-		}
-
-		if !m[add.Id()] {
+		if !etl.IsInWatchCollection(ctx, add) {
 			return "ERROR: " + d + "." + coll + "is NOT in the Watch Collections"
 		}
 
 		task.SyncTaskUpdater() <- task.SyncTaskDelta{
-			Add: []x.WatchInfo{add},
+			Add: add,
 			Del: []x.WatchInfo{},
 		}
 
