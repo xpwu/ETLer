@@ -156,7 +156,7 @@ func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
 	return nil
 }
 
-func (csr *changeStreamRunner) resumeWatch(token db.ResumeToken) (needWatch bool) {
+func (csr *changeStreamRunner) resumeWatch(token x.ResumeToken) (needWatch bool) {
 	ctx, logger := log.WithCtx(csr.ctx)
 	logger.PushPrefix("resume token.")
 

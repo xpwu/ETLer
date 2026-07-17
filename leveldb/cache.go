@@ -3,7 +3,7 @@ package leveldb
 import (
 	"context"
 	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/xpwu/ETLer/etl/db"
+	"github.com/xpwu/ETLer/x"
 	"path"
 )
 
@@ -16,7 +16,7 @@ const (
 	sentStreamKey = "sentstream"
 )
 
-func (c *cache) ResumeToken(ctx context.Context) (token db.ResumeToken, ok bool) {
+func (c *cache) ResumeToken(ctx context.Context) (token x.ResumeToken, ok bool) {
 	r, err := c.db.Get([]byte(resumeKey), nil)
 	if err == leveldb.ErrNotFound {
 		return nil, false
@@ -29,14 +29,14 @@ func (c *cache) ResumeToken(ctx context.Context) (token db.ResumeToken, ok bool)
 	return r, true
 }
 
-func (c *cache) SaveResumeToken(ctx context.Context, token db.ResumeToken) {
+func (c *cache) SaveResumeToken(ctx context.Context, token x.ResumeToken) {
 	err := c.db.Put([]byte(resumeKey), token, nil)
 	if err != nil {
 		panic(err)
 	}
 }
 
-func (c *cache) SentStreamId(ctx context.Context) (id db.StreamId, ok bool) {
+func (c *cache) SentStreamId(ctx context.Context) (id x.StreamId, ok bool) {
 	r, err := c.db.Get([]byte(sentStreamKey), nil)
 	if err == leveldb.ErrNotFound {
 		return nil, false
@@ -56,7 +56,7 @@ func (c *cache) DelSentStreamId(ctx context.Context) {
 	}
 }
 
-func (c *cache) SaveSentStreamId(ctx context.Context, id db.StreamId) {
+func (c *cache) SaveSentStreamId(ctx context.Context, id x.StreamId) {
 	err := c.db.Put([]byte(sentStreamKey), []byte(id), nil)
 	if err != nil {
 		panic(err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/xpwu/ETLer/etl/db"
+	"github.com/xpwu/ETLer/x"
 	"github.com/xpwu/go-db-mongo/mongodb/mongocache"
 	"github.com/xpwu/go-log/log"
 	"go.mongodb.org/mongo-driver/bson"
@@ -208,7 +209,7 @@ func (r *Runner) sync() error {
 func (r *Runner) sendChangeStream() error {
 
 	sendId, ok := db.Cache().SentStreamId(r.ctx)
-	values := make([]db.StreamValue, 0, r.batch)
+	values := make([]x.StreamValue, 0, r.batch)
 
 	var iter db.StreamIterator
 	if ok {
@@ -218,7 +219,7 @@ func (r *Runner) sendChangeStream() error {
 	}
 	defer iter.Release()
 
-	var lastId db.StreamId
+	var lastId x.StreamId
 
 	if ok {
 		firstId, _, ok := iter.First(r.ctx)
@@ -233,7 +234,7 @@ func (r *Runner) sendChangeStream() error {
 			return nil
 		}
 	} else {
-		var value db.StreamValue
+		var value x.StreamValue
 		lastId, value, ok = iter.First(r.ctx)
 
 		if !ok {

@@ -7,6 +7,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/xpwu/ETLer/etl/db"
+	"github.com/xpwu/ETLer/x"
 	"github.com/xpwu/go-log/log"
 	"path"
 )
@@ -33,7 +34,7 @@ const (
 	streamIdPre = 1
 )
 
-func streamId(seq uint64, token []byte) db.StreamId {
+func streamId(seq uint64, token []byte) x.StreamId {
 	id := make([]byte, 1+8, 1+8+len(token))
 	id[0] = streamIdPre
 	binary.BigEndian.PutUint64(id[1:], seq)
@@ -45,7 +46,7 @@ type streamIter struct {
 	iter iterator.Iterator
 }
 
-func (s *streamIter) First(ctx context.Context) (id db.StreamId, value db.StreamValue, ok bool) {
+func (s *streamIter) First(ctx context.Context) (id x.StreamId, value x.StreamValue, ok bool) {
 	ok = s.iter.First()
 	if !ok {
 		return nil, nil, false
@@ -57,7 +58,7 @@ func (s *streamIter) First(ctx context.Context) (id db.StreamId, value db.Stream
 	return
 }
 
-func (s *streamIter) Last(ctx context.Context) (id db.StreamId, ok bool) {
+func (s *streamIter) Last(ctx context.Context) (id x.StreamId, ok bool) {
 	ok = s.iter.Last()
 	if !ok {
 		return nil, false
@@ -68,8 +69,8 @@ func (s *streamIter) Last(ctx context.Context) (id db.StreamId, ok bool) {
 	return
 }
 
-func (s *streamIter) Next(ctx context.Context, limit int) (values []db.StreamValue, lastId db.StreamId, ok bool) {
-	values = make([]db.StreamValue, 0, limit)
+func (s *streamIter) Next(ctx context.Context, limit int) (values []x.StreamValue, lastId x.StreamId, ok bool) {
+	values = make([]x.StreamValue, 0, limit)
 
 	for s.iter.Next() {
 		lastId = s.iter.Key()
@@ -90,7 +91,7 @@ type stream struct {
 }
 
 // Save 不是并发安全的, save 的调用 本就应该是串行的
-func (s *stream) Save(ctx context.Context, token []byte, value db.StreamValue) (id db.StreamId) {
+func (s *stream) Save(ctx context.Context, token []byte, value x.StreamValue) (id x.StreamId) {
 	_, logger := log.WithCtx(ctx)
 
 	s.maxSeq += 1
@@ -109,7 +110,7 @@ func (s *stream) Save(ctx context.Context, token []byte, value db.StreamValue) (
 	return
 }
 
-func (s *stream) Get(ctx context.Context, id db.StreamId) (value db.StreamValue, ok bool) {
+func (s *stream) Get(ctx context.Context, id x.StreamId) (value x.StreamValue, ok bool) {
 	_, logger := log.WithCtx(ctx)
 
 	value, err := s.db.Get(id, nil)
@@ -130,7 +131,7 @@ func uint642bytes(i uint64) []byte {
 	return ret
 }
 
-func (s *stream) GetLastOne(ctx context.Context) (id db.StreamId, ok bool) {
+func (s *stream) GetLastOne(ctx context.Context) (id x.StreamId, ok bool) {
 	iter := &streamIter{
 		iter: s.db.NewIterator(&util.Range{
 			// 防止 max seq 的边界问题，这里 -1
@@ -151,7 +152,7 @@ func (s *stream) All(ctx context.Context) db.StreamIterator {
 		}, nil)}
 }
 
-func (s *stream) StartWith(ctx context.Context, id db.StreamId) db.StreamIterator {
+func (s *stream) StartWith(ctx context.Context, id x.StreamId) db.StreamIterator {
 	return &streamIter{
 		iter: s.db.NewIterator(&util.Range{
 			Start: id,

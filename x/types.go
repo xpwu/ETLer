@@ -14,3 +14,5 @@ func (w WatchInfo) Id() string {
 type StreamId = []byte
 
 type StreamValue = bson.Raw
+
+type ResumeToken = bson.Raw
