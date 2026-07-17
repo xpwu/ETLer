@@ -150,21 +150,23 @@ func (c *watchCollection) openTransaction() *leveldb.Transaction {
 	return tr
 }
 
-func (c *watchCollection) Save(ctx context.Context, i []x.WatchInfo, version uint64) (latestVersion uint64) {
-	latestVersion = getLatestVersion(c.db)
-	if latestVersion >= version {
-		return latestVersion
+func (c *watchCollection) Save(ctx context.Context, i []x.WatchInfo, version uint64) (oldVersion, nowVersion uint64) {
+	oldVersion = getLatestVersion(c.db)
+	nowVersion = oldVersion
+	if oldVersion >= version {
+		return
 	}
 	if version >= reserved {
-		return latestVersion
+		return
 	}
 
 	tr := c.openTransaction()
 	defer tr.Discard()
 
-	latestVersion = getLatestVersion(tr)
+	oldVersion = getLatestVersion(tr)
+	nowVersion = oldVersion
 	if latestVersion >= version {
-		return latestVersion
+		return
 	}
 
 	put(tr, uint64toKey(version), toJson(i))
@@ -173,7 +175,8 @@ func (c *watchCollection) Save(ctx context.Context, i []x.WatchInfo, version uin
 		panic(err)
 	}
 
-	return version
+	nowVersion = version
+	return
 }
 
 func (c *watchCollection) LatestVersion(ctx context.Context) uint64 {
@@ -231,7 +234,7 @@ func (c *watchCollection) DelLessThan(ctx context.Context, version uint64) {
 
 func (c *watchCollection) Clear(ctx context.Context) {
 	c.oldWc.clearOldWc(ctx)
-	
+
 	tr := c.openTransaction()
 	defer tr.Discard()
 	r := &util.Range{

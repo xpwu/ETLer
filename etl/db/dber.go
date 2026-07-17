@@ -32,7 +32,7 @@ const ConfigVersion uint64 = 0
 type WCAccessor interface {
 	LatestVersion(ctx context.Context) uint64
 	// Save latestVersion >= version 什么也不改变
-	Save(ctx context.Context, w []x.WatchInfo, version uint64) (latestVersion uint64)
+	Save(ctx context.Context, w []x.WatchInfo, version uint64) (oldVersion, nowVersion uint64)
 	Get(ctx context.Context, version uint64) []x.WatchInfo
 	DelLessThan(ctx context.Context, version uint64)
 	Clear(ctx context.Context)
