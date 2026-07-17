@@ -48,6 +48,8 @@ github.com/xdg-go/stringprep v1.0.2/go.mod h1:8F9zXuvzgwmyT5DUm4GUfZGDdT3W+LCvS6
 github.com/xpwu/go-cmd v0.1.0/go.mod h1:H4UOmHfeA1WFfH0nyMlCRDta4dppWuu5+4dTC0kKUSg=
 github.com/xpwu/go-cmd v0.4.0 h1:ACXWGkOgTjiZ6042m4+QMuh7O1k4ZdiosoubbMsLwLs=
 github.com/xpwu/go-cmd v0.4.0/go.mod h1:dq0NlzgEXfrYwV7/zvb4CXTqKZcw+hgAgqgkxFcUrPY=
+github.com/xpwu/go-cmd v0.5.0 h1:WGrDFRfS33gpMs5iLSVgVzijnc+Rj7j8FaJlMP5m2x8=
+github.com/xpwu/go-cmd v0.5.0/go.mod h1:7zppQiKecpyWfHi3heD4+jMZYob4T39lMhxUKo2QzP0=
 github.com/xpwu/go-config v0.1.0 h1:FDLQe7VroiIDk7q6MnCdvULE0O045nbNE7z32vPoabc=
 github.com/xpwu/go-config v0.1.0/go.mod h1:gqyUsbKALOtYxzdlLMCEkV823gUvDrSuhUpMntwsBEA=
 github.com/xpwu/go-db-mongo v0.1.1 h1:DrhlwHJ90tCmZsliIGNv5BhbUkaB1tg1Yr4wPwx1j/s=

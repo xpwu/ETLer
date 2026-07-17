@@ -2,7 +2,6 @@ package clientcli
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"github.com/xpwu/ETLer/etl"
 	"github.com/xpwu/ETLer/etl/task"
@@ -13,20 +12,13 @@ import (
 )
 
 func Start() {
-	ctx := context.TODO()
-	clientcli.Listen(ctx, "sync", "force sync a collection", func(args *arg.Arg) clientcli.Response {
-		_, logger := log.WithCtx(ctx)
+	clientcli.RegisterCmd("sync", "force sync a collection", func(args *arg.Arg) clientcli.AckToClient {
+		ctx, logger := log.WithCtx(context.TODO())
 
 		d, coll := "<db>", "<coll>"
 		args.String(&d, "d", "db")
 		args.String(&coll, "c", "collection")
-		err := args.ParseAndRunHookErr()
-		if err != nil {
-			if err == flag.ErrHelp {
-				return ""
-			}
-			return "ERROR: " + err.Error()
-		}
+		args.ParseAndRunHook()
 
 		logger.Debug(fmt.Sprintf("client-cli: sync %s.%s", d, coll))
 
@@ -46,4 +38,6 @@ func Start() {
 
 		return "OK!"
 	})
+
+	clientcli.Start()
 }
