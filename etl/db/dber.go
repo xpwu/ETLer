@@ -40,6 +40,7 @@ type WCAccessor interface {
 	Save(ctx context.Context, w []x.WatchInfo, version uint64) (latestVersion uint64)
 	Get(ctx context.Context, version uint64) []x.WatchInfo
 	DelLessThan(ctx context.Context, version uint64)
+	Clear(ctx context.Context)
 }
 
 // WCTaskifier 无需支持并发

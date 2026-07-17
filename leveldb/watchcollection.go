@@ -173,7 +173,7 @@ func (c *watchCollection) Save(ctx context.Context, i []x.WatchInfo, version uin
 		panic(err)
 	}
 
-	return
+	return version
 }
 
 func (c *watchCollection) LatestVersion(ctx context.Context) uint64 {
@@ -191,6 +191,14 @@ func (c *cache) all(ctx context.Context) []x.WatchInfo {
 	}
 
 	return fromJson(r)
+}
+
+func (c *cache) clearOldWc(ctx context.Context) {
+	err := c.db.Delete([]byte("watchcoll"), nil)
+
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (c *watchCollection) Get(ctx context.Context, version uint64) []x.WatchInfo {
@@ -216,6 +224,32 @@ func (c *watchCollection) DelLessThan(ctx context.Context, version uint64) {
 		del(tr, iter.Key())
 		cont = iter.Next()
 	}
+	if err := tr.Commit(); err != nil {
+		panic(err)
+	}
+}
+
+func (c *watchCollection) Clear(ctx context.Context) {
+	c.oldWc.clearOldWc(ctx)
+	
+	tr := c.openTransaction()
+	defer tr.Discard()
+	r := &util.Range{
+		Start: nil,
+		Limit: uint64toKey(reserved),
+	}
+	iter := tr.NewIterator(r, nil)
+	cont := iter.First()
+	for cont {
+		del(tr, iter.Key())
+		cont = iter.Next()
+	}
+
+	del(tr, latestVersionKey)
+	del(tr, latestSyncVersionKey)
+	del(tr, fullSyncingKey)
+	del(tr, deltaSyncingVersionKey)
+
 	if err := tr.Commit(); err != nil {
 		panic(err)
 	}
