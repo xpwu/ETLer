@@ -27,10 +27,18 @@ type SyncTaskDelta struct {
 var (
 	updateSyncTaskChan     = make(chan SyncTaskDelta)
 	watchCollectionUpdated = make(chan struct{}, 1)
+	forceFullSync          = make(chan struct{}, 1)
 )
 
 func SyncTaskUpdater() chan<- SyncTaskDelta {
 	return updateSyncTaskChan
+}
+
+func PostForceFullSync() {
+	select {
+	case forceFullSync <- struct{}{}:
+	default:
+	}
 }
 
 func WatchCollectionUpdated() {
@@ -99,6 +107,10 @@ func startAndBlock(ctx context.Context) {
 		case <-watchCollectionUpdated:
 			runner.Stop()
 			deltaSyncTaskify(ctx)
+			runner.Start()
+		case <-forceFullSync:
+			runner.Stop()
+			fullSyncTaskify(ctx)
 			runner.Start()
 		}
 	}
