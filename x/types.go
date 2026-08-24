@@ -1,6 +1,6 @@
 package x
 
-import "go.mongodb.org/mongo-driver/bson"
+import "go.mongodb.org/mongo-driver/v2/bson"
 
 type WatchInfo struct {
 	DB         string

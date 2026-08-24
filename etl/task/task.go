@@ -7,10 +7,9 @@ import (
 	"github.com/xpwu/ETLer/etl/db"
 	"github.com/xpwu/ETLer/x"
 	cmdX "github.com/xpwu/go-cmd/x"
-	"github.com/xpwu/go-db-mongo/mongodb/mongocache"
 	"github.com/xpwu/go-log/log"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsontype"
+	"github.com/xpwu/go-mongodb/client"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"time"
 )
 
@@ -63,7 +62,7 @@ func startAndBlock(ctx context.Context) {
 	}
 
 	ctx, logger := log.WithCtx(ctx)
-	client, err := mongocache.Get(ctx, config.Etl.Deployment)
+	c, err := client.GetFromCache(config.Watch.Deployment.CacheId().WithSuffix("watch"))
 	if err != nil {
 		logger.Error(err)
 		panic(err)
@@ -71,7 +70,7 @@ func startAndBlock(ctx context.Context) {
 
 	backFillSyncTaskify(ctx)
 
-	runner := NewRunner(ctx, client, batch)
+	runner := NewRunner(ctx, c, batch)
 
 	runner.Start()
 
@@ -118,7 +117,7 @@ func startAndBlock(ctx context.Context) {
 
 func MinKeyTask(info x.WatchInfo) db.Task {
 	return db.Task{
-		StartDocId: serialize(bson.RawValue{Type: bsontype.MinKey}),
+		StartDocId: serialize(bson.RawValue{Type: bson.MinKey{}}),
 		WatchInfo:  info,
 	}
 }
@@ -254,10 +253,10 @@ func InitTaskFromConfig(ctx context.Context) (succeed bool) {
 	}
 
 	old := db.WatchCollection().Get(ctx, oldVersion)
-	updateSyncTask(ctx, diffSyncTask(config.Etl.WatchCollections, old))
+	updateSyncTask(ctx, diffSyncTask(config.Watch.Collections, old))
 
 	// 必须最后保存此项，防止前面异常出错
-	db.WatchCollection().Save(ctx, config.Etl.WatchCollections, db.ConfigVersion)
+	db.WatchCollection().Save(ctx, config.Watch.Collections, db.ConfigVersion)
 	db.WatchCollection().ClearSyncingAndMarkSynced(ctx, db.ConfigVersion)
 
 	return true

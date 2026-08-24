@@ -7,7 +7,7 @@ import (
 	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/go-httpclient/httpc"
 	"github.com/xpwu/go-log/log"
-	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"net/url"
 	"time"
 )
@@ -85,7 +85,7 @@ func (h *http) Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw
 	}
 	logger.PushPrefix(fmt.Sprintf("send: %s", ty))
 
-	for _, url_ := range config.Etl.SendToUrls {
+	for _, url_ := range config.Watch.SendToUrls {
 		logger.PushPrefix(fmt.Sprintf("to: %s", url_))
 		err = h.doOne(ctx, r, url_)
 		if e, ok := err.(*url.Error); ok && e.Timeout() {

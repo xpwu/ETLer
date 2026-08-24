@@ -5,17 +5,16 @@ import (
 	"errors"
 	"github.com/xpwu/ETLer/etl/db"
 	"github.com/xpwu/ETLer/x"
-	"github.com/xpwu/go-db-mongo/mongodb/mongocache"
 	"github.com/xpwu/go-log/log"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsontype"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type Runner struct {
 	rawCtx   context.Context
 	ctx      context.Context
-	client   *mongocache.Client
+	client   *mongo.Client
 	cancel   chan context.CancelFunc
 	logger   *log.Logger
 	batch    int
@@ -23,7 +22,7 @@ type Runner struct {
 	addOne   chan struct{}
 }
 
-func NewRunner(ctx context.Context, client *mongocache.Client, batch int) *Runner {
+func NewRunner(ctx context.Context, client *mongo.Client, batch int) *Runner {
 	r := &Runner{
 		client:   client,
 		cancel:   make(chan context.CancelFunc, 1),
@@ -133,7 +132,7 @@ func serialize(value bson.RawValue) []byte {
 
 func deserialize(bytes []byte) bson.RawValue {
 	return bson.RawValue{
-		Type:  bsontype.Type(bytes[0]),
+		Type:  bson.Type(bytes[0]),
 		Value: bytes[1:],
 	}
 }

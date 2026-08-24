@@ -15,6 +15,7 @@ type StreamIterator interface {
 	Release()
 }
 
+// StreamDBer Save 不会被并发调用，但是 Save 与其它方法会并发调用
 type StreamDBer interface {
 	// Save token: StreamValue的一个唯一值，常用 resume token
 	Save(ctx context.Context, token []byte, value x.StreamValue) (id x.StreamId)

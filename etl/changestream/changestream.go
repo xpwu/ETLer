@@ -7,11 +7,11 @@ import (
 	"github.com/xpwu/ETLer/etl/db"
 	"github.com/xpwu/ETLer/x"
 	cmdX "github.com/xpwu/go-cmd/x"
-	"github.com/xpwu/go-db-mongo/mongodb/mongocache"
 	"github.com/xpwu/go-log/log"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/xpwu/go-mongodb/client"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func StartWatching() {
@@ -71,12 +71,9 @@ func startAndBlock(ctx context.Context) {
 		}
 	}()
 
-	client, err := mongocache.Get(ctx, config.Etl.Deployment)
-	if err != nil {
-		panic(err)
-	}
+	c := client.MustGet(config.Watch.Deployment.CacheId().WithSuffix("watch"))
 
-	csr := newCsr(ctx, client)
+	csr := newCsr(ctx, c)
 
 	rt, ok := db.Cache().ResumeToken(ctx)
 	if ok {
@@ -93,11 +90,11 @@ func startAndBlock(ctx context.Context) {
 
 type changeStreamRunner struct {
 	ctx       context.Context
-	client    *mongocache.Client
+	client    *mongo.Client
 	watchColl map[string]bool
 }
 
-func newCsr(ctx context.Context, client *mongocache.Client) *changeStreamRunner {
+func newCsr(ctx context.Context, client *mongo.Client) *changeStreamRunner {
 	r := &changeStreamRunner{
 		ctx:       ctx,
 		client:    client,
@@ -148,7 +145,7 @@ func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
 		db.Stream().Save(csr.ctx, cs.ResumeToken(), cs.Current)
 		postStreamChanged()
 	} else {
-		logger.Debug(ce.String(), " is NOT in the WatchCollections, so it's discarded")
+		logger.Debug(ce.String(), " is NOT in the Collections, so it's discarded")
 	}
 
 	db.Cache().SaveResumeToken(csr.ctx, cs.ResumeToken())
