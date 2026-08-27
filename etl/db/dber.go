@@ -7,7 +7,7 @@ import (
 
 type StreamIterator interface {
 	First(ctx context.Context) (id x.StreamId, value x.StreamValue, ok bool)
-	Last(ctx context.Context) (id x.StreamId, ok bool)
+	//Last(ctx context.Context) (id x.StreamId, ok bool)
 
 	// Next 必须按照StreamId顺序返回
 	Next(ctx context.Context, limit int) (values []x.StreamValue, lastId x.StreamId, ok bool)
@@ -19,12 +19,12 @@ type StreamIterator interface {
 type StreamDBer interface {
 	// Save token: StreamValue的一个唯一值，常用 resume token
 	Save(ctx context.Context, token []byte, value x.StreamValue) (id x.StreamId)
-	Get(ctx context.Context, id x.StreamId) (value x.StreamValue, ok bool)
+	//Get(ctx context.Context, id x.StreamId) (value x.StreamValue, ok bool)
 
 	All(ctx context.Context) StreamIterator
 	StartWith(ctx context.Context, id x.StreamId) StreamIterator
 
-	GetLastOne(ctx context.Context) (id x.StreamId, ok bool)
+	//GetLastOne(ctx context.Context) (id x.StreamId, ok bool)
 }
 
 const ConfigVersion uint64 = 0
@@ -87,6 +87,7 @@ type CacheDBer interface {
 	SaveResumeToken(ctx context.Context, token x.ResumeToken)
 
 	SentStreamId(ctx context.Context) (id x.StreamId, ok bool)
-	DelSentStreamId(ctx context.Context)
+	// DelSentStreamId(ctx context.Context)
+
 	SaveSentStreamId(ctx context.Context, id x.StreamId)
 }
