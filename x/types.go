@@ -1,7 +1,5 @@
 package x
 
-import "go.mongodb.org/mongo-driver/v2/bson"
-
 type WatchInfo struct {
 	DB         string
 	Collection string
@@ -10,9 +8,3 @@ type WatchInfo struct {
 func (w WatchInfo) Id() string {
 	return w.DB + "." + w.Collection
 }
-
-type StreamId = []byte
-
-type StreamValue = bson.Raw
-
-type ResumeToken = bson.Raw
