@@ -9,7 +9,7 @@ require (
 	github.com/xpwu/go-config v0.1.0
 	github.com/xpwu/go-httpclient v0.1.4
 	github.com/xpwu/go-log v0.1.0
-	github.com/xpwu/go-mongodb v0.3.3
+	github.com/xpwu/go-mongodb v0.3.4
 	github.com/xpwu/go-tinyserver v0.2.0
 	github.com/xpwu/go-x v0.3.0
 )
