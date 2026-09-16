@@ -6,25 +6,27 @@ import (
 	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/ETLer/etl/db"
 	"github.com/xpwu/ETLer/x"
-	cmdX "github.com/xpwu/go-cmd/x"
 	"github.com/xpwu/go-log/log"
 	"github.com/xpwu/go-mongodb/client"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"time"
 )
 
 func StartWatching() {
-	cmdX.AutoRestart(context.TODO(), "change-stream", startAndBlock)
+	x.AutoRestartPanic(startAndBlock, x.WithName("watchChangeStream"))
 }
 
+type SyncAckChan = chan struct{}
+
 var (
-	syncChan               = make(chan struct{}, 1)
+	syncChan               = make(chan SyncAckChan)
 	newStreamChan          = make(chan struct{}, 1)
 	watchCollectionUpdated = make(chan struct{}, 1)
 )
 
-func NeedForceSync() <-chan struct{} {
+func NeedForceSync() <-chan SyncAckChan {
 	return syncChan
 }
 
@@ -39,13 +41,6 @@ func WatchCollectionUpdated() {
 	}
 }
 
-func postNeedForceSync() {
-	select {
-	case syncChan <- struct{}{}:
-	default:
-	}
-}
-
 func postStreamChanged() {
 	select {
 	case newStreamChan <- struct{}{}:
@@ -53,7 +48,7 @@ func postStreamChanged() {
 	}
 }
 
-func startAndBlock(ctx context.Context) {
+func startAndBlock(ctx context.Context) error {
 	select {
 	case <-watchCollectionUpdated:
 	default:
@@ -71,21 +66,94 @@ func startAndBlock(ctx context.Context) {
 		}
 	}()
 
-	c := client.MustGet(config.Watch.Deployment.CacheId().WithSuffix("watch"))
+	var mongoClient *mongo.Client
 
-	csr := newCsr(ctx, c)
-
-	rt, ok := db.Cache().ResumeToken(ctx)
-	if ok {
-		logger.Info("read resume token = " + rt.String() + ".")
-		needWatch := csr.resumeWatch(rt)
-		if !needWatch {
-			panic("resume watch error")
+	for {
+		c, err := client.GetFromCache(config.Watch.Deployment.CacheId().WithSuffix("watch"))
+		if err == nil {
+			mongoClient = c
+			break
 		}
-		logger.Error("resume watch failed, will try not-resume watch")
+		// 出现错误，很大概率是配置文件写错，需要重写配置文件，但为了防止有未考虑到的情况，15s 后重试一下
+		logger.Error(fmt.Sprintf("mongo connect failed, you should reset the config: %v", err))
+		time.Sleep(15 * time.Second)
 	}
 
-	csr.notResumeWatch()
+	for {
+		var streamErr *StreamError
+
+		resumeToken := db.ChangeStream().LastResumeToken(ctx)
+		if resumeToken == nil {
+			resumeToken, streamErr = initWatching(ctx, mongoClient)
+		}
+
+		if streamErr == nil {
+			streamErr = watch(ctx, mongoClient, resumeToken)
+		}
+
+		switch {
+		case streamErr.Is(ErrTokenExpired):
+			db.ChangeStream().DeleteAll(ctx)
+			time.Sleep(1 * time.Second)
+		case streamErr.Is(ErrRetryBackoff) || streamErr.Is(ErrStopForOps):
+			time.Sleep(15 * time.Second)
+		default: // ErrShuttingDown, ErrRetryNow - retry now
+			time.Sleep(1 * time.Second)
+		}
+	}
+}
+
+func watch(ctx context.Context, client *mongo.Client, resumeToken bson.Raw) *StreamError {
+	csr := newCsr(ctx, client)
+
+	// *** option 与 pipeline 不要修改， 否则可能有未知异常 ***
+	cs, err := csr.client.Watch(ctx, mongo.Pipeline{},
+		options.ChangeStream().SetFullDocument(options.UpdateLookup).SetStartAfter(resumeToken))
+
+	if err != nil {
+		return AsStreamError(err, false)
+	}
+
+	for cs.Next(ctx) {
+		streamErr := csr.processStream(cs)
+		if streamErr != nil {
+			return streamErr
+		}
+	}
+
+	return AsStreamError(cs.Err(), false)
+}
+
+// initWatching resumeToken 最后保存到的那个 ResumeToken
+func initWatching(ctx context.Context, client *mongo.Client) (resumeToken bson.Raw, stErr *StreamError) {
+	ctx, logger := log.WithCtx(ctx)
+	logger.Info("init watching ... ")
+	cs, err := client.Watch(ctx, mongo.Pipeline{},
+		options.ChangeStream().SetFullDocument(options.UpdateLookup).SetStartAtOperationTime(&bson.Timestamp{T: 1}))
+	if err != nil {
+		return nil, AsStreamError(err, false)
+	}
+
+	// 返回最后获取到的那个 ResumeToken
+	for cs.TryNext(ctx) {
+		resumeToken = cs.ResumeToken()
+	}
+	if resumeToken == nil {
+		return nil, &StreamError{
+			Code:   ErrRetryBackoff.Code,
+			Reason: "init watching: resumeToken = nil",
+			Err:    cs.Err(),
+		}
+	}
+
+	syncAck := make(SyncAckChan, 1)
+	syncChan <- syncAck
+	<-syncAck
+	close(syncAck)
+	// 必须等待 sync ack 才能保存 resumeToken, 否则可能出现 sync 丢失的情况
+	db.ChangeStream().Save(ctx, resumeToken, nil)
+
+	return resumeToken, AsStreamError(cs.Err(), false)
 }
 
 type changeStreamRunner struct {
@@ -124,13 +192,21 @@ func (e *event) String() string {
 		e.Ns.Db, e.Ns.Coll, e.OperationType, e.DocumentKey, e.Id)
 }
 
-func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
+func (csr *changeStreamRunner) processStream(cs *mongo.ChangeStream) *StreamError {
 	_, logger := log.WithCtx(csr.ctx)
 
-	ce := event{}
-	err := cs.Decode(&ce)
+	resumeToken := cs.ResumeToken()
+	if resumeToken == nil {
+		return &StreamError{
+			Code:   ErrRetryBackoff.Code,
+			Reason: "processStream: resumeToken = nil",
+		}
+	}
+
+	ce := &event{}
+	err := cs.Decode(ce)
 	if err != nil {
-		return err
+		return AsStreamError(err, false)
 	}
 
 	cid := x.WatchInfo{
@@ -139,90 +215,15 @@ func (csr *changeStreamRunner) processCs(cs *mongo.ChangeStream) error {
 	}.Id()
 
 	logger.Debug("watched: ", ce.String())
-	// 只是保存监听的
-	if csr.watchColl[cid] {
+
+	if csr.watchColl[cid] && ce.OperationType != "invalidate" {
+		db.ChangeStream().Save(csr.ctx, resumeToken, cs.Current)
 		logger.Info("save change stream: ", ce.String())
-		db.Stream().Save(csr.ctx, cs.ResumeToken(), cs.Current)
 		postStreamChanged()
 	} else {
-		logger.Debug(ce.String(), " is NOT in the Collections, so it's discarded")
+		db.ChangeStream().Save(csr.ctx, resumeToken, nil)
+		logger.Debug(ce.String(), " is NOT in the Watching Collections, so it's discarded")
 	}
 
-	db.Cache().SaveResumeToken(csr.ctx, cs.ResumeToken())
-
-	return nil
-}
-
-func (csr *changeStreamRunner) resumeWatch(token x.ResumeToken) (needWatch bool) {
-	ctx, logger := log.WithCtx(csr.ctx)
-	logger.PushPrefix("resume token.")
-
-	cs, err := csr.client.Watch(ctx, mongo.Pipeline{},
-		options.ChangeStream().SetFullDocument(options.UpdateLookup).SetResumeAfter(token))
-
-	if err != nil {
-		logger.Error(err)
-
-		// 目前没有文档说明，错误是resume不成功，还是其他错误，所以默认返回true，表示需要普通watch
-		// 只能尽可能的判断，因为进入no-resume流程时，会触发sync，但如果是网络错误，其实不应该触发
-		if mongo.IsTimeout(err) {
-			logger.Error("timeout err, not try no-resume watch ", err)
-			return false
-		}
-		if mongo.IsNetworkError(err) {
-			logger.Error("network err, not try no-resume watch ", err)
-			return false
-		}
-
-		return true
-	}
-
-	first := true
-	for cs.Next(ctx) {
-		first = false
-
-		err = csr.processCs(cs)
-		if err != nil {
-			break
-		}
-	}
-
-	if err == nil {
-		err = cs.Err()
-	}
-	logger.Error(err)
-
-	// 目前没有文档说明，错误是resume不成功，还是其他错误，所以如果是第一次Next()，就返回true，表示需要普通watch
-	// 不是第一次就说明肯定不是resumeToken找不到引起的错误，就返回false，
-	return first
-}
-
-func (csr *changeStreamRunner) notResumeWatch() {
-	ctx, logger := log.WithCtx(csr.ctx)
-	logger.PushPrefix("no-resume watch.")
-
-	cs, err := csr.client.Watch(ctx, mongo.Pipeline{},
-		options.ChangeStream().SetFullDocument(options.UpdateLookup))
-
-	if err != nil {
-		logger.Error(err)
-		panic(err)
-	}
-
-	postNeedForceSync()
-
-	db.Cache().SaveResumeToken(csr.ctx, cs.ResumeToken())
-
-	for cs.Next(ctx) {
-		err = csr.processCs(cs)
-		if err != nil {
-			break
-		}
-	}
-
-	if err == nil {
-		err = cs.Err()
-	}
-	logger.Error(err)
-	panic(err)
+	return AsStreamError(cs.Err(), ce.OperationType == "invalidate")
 }

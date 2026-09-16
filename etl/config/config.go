@@ -7,16 +7,14 @@ import (
 )
 
 type watch struct {
-	Deployment   client.Config `conf:", Watching DB"`
-	FullDocument bool          `conf:",https://www.mongodb.com/docs/v4.2/changeStreams/#lookup-full-document-for-update-operations"`
-	Collections  []x.WatchInfo `conf:",init the WatchCollections"`
-	SendToUrls   []string      `conf:",send in order until successful"`
+	Deployment  client.Config `conf:", Watching DB"`
+	Collections []x.WatchInfo `conf:",init the WatchCollections"`
+	SendToUrls  []string      `conf:",send in order until successful"`
 }
 
 var Watch = &watch{
-	SendToUrls:   []string{"http://send/data/to"},
-	FullDocument: true,
-	Collections:  []x.WatchInfo{{}},
+	SendToUrls:  []string{"http://send/data/to"},
+	Collections: []x.WatchInfo{{}},
 	Deployment: client.Config{
 		MaxConn: 2,
 	},

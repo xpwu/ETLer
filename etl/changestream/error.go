@@ -29,7 +29,13 @@ func (e *StreamError) Unwrap() error {
 }
 
 func (e *StreamError) Is(target error) bool {
+	if e == nil || target == nil {
+		return false
+	}
 	if se, ok := target.(*StreamError); ok {
+		if se == nil {
+			return false
+		}
 		return e.Code == se.Code
 	}
 	return false
