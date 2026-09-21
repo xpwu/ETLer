@@ -12,34 +12,10 @@ import (
 	"time"
 )
 
-type Type byte
-
-func (t Type) String() string {
-	switch t {
-	case Sync:
-		return "sync"
-	case ChangeStream:
-		return "change-stream"
-	}
-
-	return "<unknown>"
-}
-
-const (
-	Sync Type = iota
-	ChangeStream
-)
-
 var (
 	canceledErr   = context.Canceled
 	sendFailedErr = errors.New("send failed")
 )
-
-type Proxy interface {
-	Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (err error)
-}
-
-var Sender Proxy = &http{}
 
 type ns struct {
 	DB   string
@@ -56,10 +32,10 @@ type Request struct {
 type Response struct {
 }
 
-type http struct {
+type HttpNetLayer struct {
 }
 
-func (h *http) doOne(ctx context.Context, r *Request, url string) (err error) {
+func (h *HttpNetLayer) doOne(ctx context.Context, r *Request, url string) (err error) {
 	ctx, logger := log.WithCtx(ctx)
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -73,7 +49,7 @@ func (h *http) doOne(ctx context.Context, r *Request, url string) (err error) {
 	return
 }
 
-func (h *http) Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (err error) {
+func (h *HttpNetLayer) Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (err error) {
 	ctx, logger := log.WithCtx(ctx)
 	r := &Request{
 		T: ty,

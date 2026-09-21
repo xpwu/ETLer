@@ -70,12 +70,12 @@ func startAndBlock(ctx context.Context) {
 
 	backFillSyncTaskify(ctx)
 
-	runner := NewRunner(ctx, c, batch)
+	runner := NewSender(ctx, c, batch)
 
 	runner.Start()
 
 	again := false
-	// 必须先停止 Runner，才能更新 同步任务。防止任务更新后被意外改写
+	// 必须先停止 Sender，才能更新 同步任务。防止任务更新后被意外改写
 	for {
 		select {
 		case code := <-runner.Done():
@@ -230,7 +230,7 @@ func deltaSyncTaskify(ctx context.Context) {
 		return
 	}
 
-	db.WatchCollection().DeltaSyncing(ctx, latestVer)
+	db.WatchCollection().MarkDeltaSyncing(ctx, latestVer)
 	latest := db.WatchCollection().Get(ctx, latestVer)
 	updateSyncTask(ctx, diffSyncTask(latest, latestSyncedWc))
 	db.WatchCollection().ClearSyncingAndMarkSynced(ctx, latestVer)
