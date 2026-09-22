@@ -8,22 +8,23 @@ import (
 	"github.com/xpwu/go-log/log"
 )
 
-type syncWcReq struct {
-	WatchCols []x.WatchInfo `json:"watchcols"`
+type syncCollectionReq struct {
+	Collections []x.WatchInfo `json:"colls"`
 }
 
 type syncWcRes struct {
 	Succeed bool
 }
 
-func (s *suite) APISyncWatchCol(ctx context.Context, request *syncWcReq) *syncWcRes {
+// APIForceSyncColl 强制全量同步 syncWcReq 指定的 collections, 指定的 collection 必须是之前配置/设置的监听集合的子集
+func (s *suite) APIForceSyncColl(ctx context.Context, request *syncCollectionReq) *syncWcRes {
 	ctx, logger := log.WithCtx(ctx)
 	logger.PushPrefix("api SyncWatchCol ")
 
-	if !etl.IsInWatchCollection(ctx, request.WatchCols) {
+	if !etl.IsInWatchCollection(ctx, request.Collections) {
 		return &syncWcRes{false}
 	}
-	task.SyncTaskUpdater() <- task.SyncTaskDelta{Add: request.WatchCols, Del: []x.WatchInfo{}}
+	task.SyncTaskUpdater() <- task.SyncTaskDelta{Add: request.Collections, Del: []x.WatchInfo{}}
 
 	return &syncWcRes{true}
 }

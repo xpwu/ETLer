@@ -10,6 +10,7 @@ import (
 type fullSyncReq struct {
 }
 
+// APIForceFullSync 强制全量同步所有监听的 collections
 func (s *suite) APIForceFullSync(ctx context.Context, request *clearReq) *api.EmptyResponse {
 	ctx, logger := log.WithCtx(ctx)
 	logger.PushPrefix("api ForceFullSync")

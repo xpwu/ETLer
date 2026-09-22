@@ -11,11 +11,12 @@ import (
 type clearReq struct {
 }
 
-func (s *suite) APIClear(ctx context.Context, request *clearReq) *api.EmptyResponse {
+// APIClearWC 清除所有监听的 collections
+func (s *suite) APIClearWC(ctx context.Context, request *clearReq) *api.EmptyResponse {
 	ctx, logger := log.WithCtx(ctx)
 	logger.PushPrefix("api Clear")
 
-	db.WatchCollection().Clear(ctx)
+	db.WatchCollection().DelAll(ctx)
 	etl.WatchCollectionUpdated()
 
 	return &api.EmptyResponse{}
