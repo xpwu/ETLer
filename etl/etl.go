@@ -16,7 +16,7 @@ func Start() {
 		if task.InitTaskFromConfig(ctx) {
 			break
 		}
-		logger.Error("initTaskFromConfig error, will retry after 10s")
+		logger.Error("initTaskFromConfig error, will retry after 5s")
 		time.Sleep(5 * time.Second)
 	}
 

@@ -18,7 +18,7 @@ func StartWatching() {
 	x.AutoRestartPanic(startAndBlock, x.WithName("watchChangeStream"))
 }
 
-type SyncAckChan = chan struct{}
+type SyncAckChan = chan<- struct{}
 
 var (
 	syncChan               = make(chan SyncAckChan)
@@ -82,7 +82,7 @@ func startAndBlock(ctx context.Context) error {
 	for {
 		var streamErr *StreamError
 
-		resumeToken := db.ChangeStream().LastResumeToken(ctx)
+		resumeToken := db.ChangeStream().ResumeToken(ctx)
 		if resumeToken == nil {
 			resumeToken, streamErr = initWatching(ctx, mongoClient)
 		}
@@ -146,12 +146,16 @@ func initWatching(ctx context.Context, client *mongo.Client) (resumeToken bson.R
 		}
 	}
 
-	syncAck := make(SyncAckChan, 1)
+	syncAck := make(chan struct{}, 1)
 	syncChan <- syncAck
 	<-syncAck
 	close(syncAck)
 	// 必须等待 sync ack 才能保存 resumeToken, 否则可能出现 sync 丢失的情况
-	db.ChangeStream().Save(ctx, resumeToken, nil)
+	id, err := db.ChangeStream().Save(ctx, resumeToken, nil)
+	if err != nil {
+		return nil, AsStreamError(err, false)
+	}
+	db.ChangeStream().MarkSentUpTo(ctx, id)
 
 	return resumeToken, AsStreamError(cs.Err(), false)
 }
@@ -217,11 +221,17 @@ func (csr *changeStreamRunner) processStream(cs *mongo.ChangeStream) *StreamErro
 	logger.Debug("watched: ", ce.String())
 
 	if csr.watchColl[cid] && ce.OperationType != "invalidate" {
-		db.ChangeStream().Save(csr.ctx, resumeToken, cs.Current)
+		_, err = db.ChangeStream().Save(csr.ctx, resumeToken, cs.Current)
+		if err != nil {
+			return AsStreamError(err, false)
+		}
 		logger.Info("save change stream: ", ce.String())
 		postStreamChanged()
 	} else {
-		db.ChangeStream().Save(csr.ctx, resumeToken, nil)
+		_, err = db.ChangeStream().Save(csr.ctx, resumeToken, nil)
+		if err != nil {
+			return AsStreamError(err, false)
+		}
 		logger.Debug(ce.String(), " is NOT in the Watching Collections, so it's discarded")
 	}
 

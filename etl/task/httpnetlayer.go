@@ -12,11 +12,6 @@ import (
 	"time"
 )
 
-var (
-	canceledErr   = context.Canceled
-	sendFailedErr = errors.New("send failed")
-)
-
 type ns struct {
 	DB   string
 	Coll string
@@ -49,7 +44,7 @@ func (h *HttpNetLayer) doOne(ctx context.Context, r *Request, url string) (err e
 	return
 }
 
-func (h *HttpNetLayer) Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (err error) {
+func (h *HttpNetLayer) Send(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (err error) {
 	ctx, logger := log.WithCtx(ctx)
 	r := &Request{
 		T: ty,
@@ -64,12 +59,13 @@ func (h *HttpNetLayer) Do(ctx context.Context, ty Type, db, coll string, data []
 	for _, url_ := range config.Watch.SendToUrls {
 		logger.PushPrefix(fmt.Sprintf("to: %s", url_))
 		err = h.doOne(ctx, r, url_)
-		if e, ok := err.(*url.Error); ok && e.Timeout() {
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) && urlErr.Timeout() {
 			time.Sleep(1 * time.Second)
 			err = h.doOne(ctx, r, url_)
 		}
 		if ctx.Err() == context.Canceled {
-			return canceledErr
+			return context.Canceled
 		}
 		if err == nil {
 			return
@@ -79,5 +75,5 @@ func (h *HttpNetLayer) Do(ctx context.Context, ty Type, db, coll string, data []
 
 	logger.Error("failed")
 
-	return sendFailedErr
+	return ErrSendFailed
 }

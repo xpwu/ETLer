@@ -6,16 +6,16 @@ import (
 	"github.com/xpwu/ETLer/etl/config"
 	"github.com/xpwu/ETLer/etl/db"
 	"github.com/xpwu/ETLer/x"
-	cmdX "github.com/xpwu/go-cmd/x"
 	"github.com/xpwu/go-log/log"
 	"github.com/xpwu/go-mongodb/client"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 	"time"
 )
 
 const (
 	batch int = 1000
-	retry     = 1 * time.Minute
+	retry     = 15 * time.Second
 )
 
 type SyncTaskDelta struct {
@@ -48,10 +48,10 @@ func WatchCollectionUpdated() {
 }
 
 func Start() {
-	cmdX.AutoRestart(context.TODO(), "send-task", startAndBlock)
+	x.AutoRestartPanic(startAndBlock, x.WithName("scheduler"))
 }
 
-func startAndBlock(ctx context.Context) {
+func startAndBlock(ctx context.Context) error {
 	select {
 	case <-watchCollectionUpdated:
 	default:
@@ -62,62 +62,71 @@ func startAndBlock(ctx context.Context) {
 	}
 
 	ctx, logger := log.WithCtx(ctx)
-	c, err := client.GetFromCache(config.Watch.Deployment.CacheId().WithSuffix("watch"))
-	if err != nil {
+	var mongoClient *mongo.Client
+
+	for {
+		var err error
+		mongoClient, err = client.GetFromCache(config.Watch.Deployment.CacheId().WithSuffix("watch"))
+		if err == nil {
+			break
+		}
+
 		logger.Error(err)
-		panic(err)
+		time.Sleep(15 * time.Second)
 	}
 
 	backFillSyncTaskify(ctx)
 
-	runner := NewSender(ctx, c, batch)
+	sender := NewSender(ctx, mongoClient, batch)
 
-	runner.Start()
+	sender.Start()
 
 	again := false
 	// 必须先停止 Sender，才能更新 同步任务。防止任务更新后被意外改写
 	for {
 		select {
-		case code := <-runner.Done():
+		case code := <-sender.Done():
 			switch code {
 			case NeedForceSync:
 				fullSyncTaskify(ctx)
-				runner.Start()
+				sender.Start()
 			case SendFailed:
 				time.Sleep(retry)
-				runner.Start()
+				sender.Start()
 			case Ok:
 				if again {
-					again = runner.Start()
+					again = sender.Start()
 				}
 			case UnknownErr:
-				panic("error, wait for restarting")
+				logger.Error("unknown err, restart after 5s")
+				time.Sleep(5 * time.Second)
 			}
-		case <-changestream.NeedForceSync():
-			runner.Stop()
+		case ack := <-changestream.NeedForceSync():
+			sender.Stop()
 			fullSyncTaskify(ctx)
-			runner.Start()
+			ack <- struct{}{}
+			sender.Start()
 		case <-changestream.OnStreamChanged():
-			again = runner.Start()
+			again = sender.Start()
 		case delta := <-updateSyncTaskChan:
-			runner.Stop()
+			sender.Stop()
 			updateSyncTask(ctx, delta)
-			runner.Start()
+			sender.Start()
 		case <-watchCollectionUpdated:
-			runner.Stop()
+			sender.Stop()
 			deltaSyncTaskify(ctx)
-			runner.Start()
+			sender.Start()
 		case <-forceFullSync:
-			runner.Stop()
+			sender.Stop()
 			fullSyncTaskify(ctx)
-			runner.Start()
+			sender.Start()
 		}
 	}
 }
 
 func MinKeyTask(info x.WatchInfo) db.Task {
 	return db.Task{
-		StartDocId: serialize(bson.RawValue{Type: bson.MinKey{}}),
+		UntilDocId: bson.RawValue{Type: bson.TypeMinKey},
 		WatchInfo:  info,
 	}
 }

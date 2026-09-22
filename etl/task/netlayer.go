@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -23,6 +24,11 @@ const (
 	ChangeStream
 )
 
+var (
+	ErrSendFailed = errors.New("send failed")
+)
+
 type NetLayer interface {
-	Do(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (err error)
+	// Send err = context.Canceled or ErrSendFailed
+	Send(ctx context.Context, ty Type, db, coll string, data []bson.Raw) (err error)
 }

@@ -2,9 +2,7 @@ package task
 
 import (
 	"context"
-	"errors"
 	"github.com/xpwu/ETLer/etl/db"
-	"github.com/xpwu/ETLer/x"
 	"github.com/xpwu/go-log/log"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -60,13 +58,7 @@ func (s *Sender) Done() <-chan SenderCode {
 	return s.doneChan
 }
 
-var (
-	senderErr             = errors.New("sender error")
-	stoppedErr            = errors.New("stopped")
-	lastStreamNotFoundErr = errors.New("CAN NOT find last stream id")
-)
-
-func (s *Sender) cancelSafely() (cancelled bool) {
+func (s *Sender) cancelSafely() (canceled bool) {
 	select {
 	case cancel := <-s.cancel:
 		cancel()
@@ -107,11 +99,11 @@ func (s *Sender) Start() (isBusy bool) {
 		s.cancelSafely()
 
 		switch err {
-		case senderErr:
+		case ErrSendFailed:
 			s.done(SendFailed)
-		case lastStreamNotFoundErr:
+		case db.ErrNotFoundSentPoint:
 			s.done(NeedForceSync)
-		case stoppedErr:
+		case context.Canceled:
 			s.done(ByStopped)
 		case nil:
 			s.done(Ok)
@@ -132,139 +124,82 @@ func (s *Sender) Stop() {
 	}
 }
 
-func serialize(value bson.RawValue) []byte {
-	ret := make([]byte, 1, 1+len(value.Value))
-	ret[0] = byte(value.Type)
-	return append(ret, value.Value...)
-}
-
-func deserialize(bytes []byte) bson.RawValue {
-	return bson.RawValue{
-		Type:  bson.Type(bytes[0]),
-		Value: bytes[1:],
-	}
-}
-
+// err context.Canceled, ErrSendFailed or unknown
 func (s *Sender) sync() error {
-
 	iter := db.SyncTask().All(s.ctx)
 	defer iter.Release()
 
-	task, ok := iter.First(s.ctx)
-	for ok {
+	for iter.Next(s.ctx) {
+		task := iter.Current()
 		coll := s.client.Database(task.DB).Collection(task.Collection)
-		docId := deserialize(task.StartDocId)
+		docId := task.UntilDocId
 
 		for {
 			cursor, err := coll.Find(s.ctx, bson.D{{"_id", bson.D{{"$gt", docId}}}},
 				options.Find().SetLimit(int64(s.batch)).SetSort(bson.D{{"_id", 1}}))
 			if err == context.Canceled {
 				s.logger.Debug(err)
-				return stoppedErr
+				return err
 			}
-
 			if err != nil {
 				s.logger.Error(err)
 				return err
 			}
 
 			all := make([]bson.Raw, 0, s.batch)
-			i := 0
 			for cursor.Next(s.ctx) {
-				i += 1
 				docId = cursor.Current.Lookup("_id")
 				all = append(all, cursor.Current)
 			}
+			if cursor.Err() == context.Canceled {
+				return cursor.Err()
+			}
 
-			err = netLayer.Do(s.ctx, Sync, task.DB, task.Collection, all)
-			if err == canceledErr {
-				s.logger.Warning("change stream sender canceled")
-				return stoppedErr
+			if len(all) != 0 {
+				err = netLayer.Send(s.ctx, Sync, task.DB, task.Collection, all)
 			}
 			if err != nil {
 				s.logger.Warning("change stream sender failed: " + err.Error())
-				return senderErr
+				return err
 			}
 
 			err = cursor.Err()
 
-			// over
-			if i < s.batch && err == nil {
+			// finished
+			if len(all) < s.batch && err == nil {
 				db.SyncTask().Del(s.ctx, task.Id())
 				break
 			}
 
-			if err == context.Canceled {
-				return stoppedErr
-			}
 			if err != nil {
 				s.logger.Error("cursor error.", err)
 				return err
 			}
 
 			// update
-			task.StartDocId = serialize(docId)
+			task.UntilDocId = docId
 			db.SyncTask().InsertOrUpdate(s.ctx, task)
 		}
-
-		task, ok = iter.Next(s.ctx)
 	}
 
 	return nil
 }
 
+// err context.Canceled, ErrSendFailed, ErrNotFoundSentPoint or unknown
 func (s *Sender) sendChangeStream() error {
-
-	sendId, ok := db.Cache().SentStreamId(s.ctx)
-	values := make([]x.StreamValue, 0, s.batch)
-
-	var iter db.ChangeStreamIterator
-	if ok {
-		iter = db.ChangeStream().StartWith(s.ctx, sendId)
-	} else {
-		iter = db.ChangeStream().All(s.ctx)
-	}
+	iter := db.ChangeStream().AllNotSent(s.ctx)
 	defer iter.Release()
 
-	var lastId x.StreamId
+	for iter.Next(s.ctx, s.batch) {
+		err := netLayer.Send(s.ctx, ChangeStream, "", "", iter.Values())
 
-	if ok {
-		firstId, _, ok := iter.First(s.ctx)
-
-		// 之前发送过的stream 已经不能在stream找到，说明中间有断层，必须force sync
-		if !ok || string(firstId) != string(sendId) {
-			return lastStreamNotFoundErr
-		}
-
-		values, lastId, ok = iter.Next(s.ctx, 1)
-		if !ok {
-			return nil
-		}
-	} else {
-		var value x.StreamValue
-		lastId, value, ok = iter.First(s.ctx)
-
-		if !ok {
-			s.logger.Info("sendChangeStream: has not stream to send")
-			return nil
-		}
-		values = append(values, value)
-	}
-
-	for ok {
-		err := Sender.Do(s.ctx, ChangeStream, "", "", values)
-		if err == canceledErr {
-			s.logger.Warning("change stream sender canceled")
-			return stoppedErr
-		}
 		if err != nil {
-			s.logger.Warning("change stream sender failed: " + err.Error())
-			return senderErr
+			s.logger.Warning("change stream send failed: " + err.Error())
+			return err
 		}
 
-		db.Cache().SaveSentStreamId(s.ctx, lastId)
-		values, lastId, ok = iter.Next(s.ctx, s.batch)
+		db.ChangeStream().MarkSentUpTo(s.ctx, iter.LastStreamId())
 	}
 
-	return nil
+	return iter.Err()
 }
