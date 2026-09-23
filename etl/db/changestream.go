@@ -2,7 +2,7 @@ package db
 
 import (
 	"context"
-	"github.com/syndtr/goleveldb/leveldb/errors"
+	"errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
