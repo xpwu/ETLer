@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/xpwu/ETLer/clientcli"
 	"github.com/xpwu/ETLer/etl"
 	"github.com/xpwu/ETLer/httpapi"
 	"github.com/xpwu/ETLer/leveldb"
@@ -20,7 +19,6 @@ func main() {
 
 		leveldb.Init(exe.AbsDir)
 		etl.Start()
-		clientcli.Start()
 
 		httpapi.AddAPI()
 		http.Start()
