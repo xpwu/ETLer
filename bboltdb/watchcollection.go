@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/xpwu/go-log/log"
 	"go.etcd.io/bbolt/errors"
 	"math"
 
@@ -125,12 +126,20 @@ type WatchCollection struct {
 	db *bbolt.DB
 }
 
-func NewWatchCollection(ctx context.Context, db *DB) *WatchCollection {
-	_ = db.Underlying.Update(func(tx *bbolt.Tx) error {
+func NewWatchCollection(ctx context.Context, db *DB) (wc *WatchCollection, err error) {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("NewWatchCollection")
+
+	err = db.Underlying.Update(func(tx *bbolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists([]byte(wcBucketName))
 		return err
 	})
-	return &WatchCollection{db.Underlying}
+	if err != nil {
+		logger.Error(err)
+		return nil, err
+	}
+
+	return &WatchCollection{db.Underlying}, nil
 }
 
 func (w *WatchCollection) LatestVersion(ctx context.Context) uint64 {

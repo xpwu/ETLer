@@ -1,14 +1,16 @@
 package main
 
 import (
+	"fmt"
+	"github.com/xpwu/ETLer/bboltdb"
 	"github.com/xpwu/ETLer/etl"
 	"github.com/xpwu/ETLer/httpapi"
-	"github.com/xpwu/ETLer/leveldb"
 	"github.com/xpwu/go-cmd/arg"
 	"github.com/xpwu/go-cmd/cmd"
 	_ "github.com/xpwu/go-cmd/cmd/printconf"
+	"github.com/xpwu/go-log/log"
 	"github.com/xpwu/go-tinyserver/http"
-	"github.com/xpwu/go-x/exe"
+	"os"
 )
 
 func main() {
@@ -17,7 +19,12 @@ func main() {
 		arg.HookReadConfigTo(args)
 		args.ParseAndRunHook()
 
-		leveldb.Init(exe.AbsDir)
+		err := bboltdb.Init()
+		if err != nil {
+			log.Error(fmt.Sprintf("init bbolt db error: %s", err))
+			os.Exit(2)
+		}
+
 		etl.Start()
 
 		httpapi.AddAPI()

@@ -3,6 +3,7 @@ package bboltdb
 import (
 	"context"
 	"fmt"
+	"github.com/xpwu/ETLer/etl/db"
 	"github.com/xpwu/go-log/log"
 	"github.com/xpwu/go-x/exe"
 	"os"
@@ -11,6 +12,36 @@ import (
 
 	"go.etcd.io/bbolt"
 )
+
+func Init() error {
+	ctx := context.Background()
+	localDB, err := New(ctx, "bboltdb")
+	if err != nil {
+		return err
+	}
+
+	cs, err := NewChangeStream(ctx, localDB)
+	if err != nil {
+		return err
+	}
+
+	st, err := NewSyncTask(ctx, localDB)
+	if err != nil {
+		return err
+	}
+
+	wc, err := NewWatchCollection(ctx, localDB)
+	if err != nil {
+		return err
+	}
+
+	db.SetBackupWorker(localDB)
+	db.SetSyncTask(st)
+	db.SetWatchCollection(wc)
+	db.SetChangeStream(cs)
+
+	return nil
+}
 
 const dbName = "etlworkdb"
 
@@ -24,13 +55,14 @@ type DB struct {
 	CompactAbles []CompactAble
 }
 
+// New dir 相对于服务运行目录的相对目录
 func New(ctx context.Context, dir string) (*DB, error) {
-	db := &DB{}
-	db.Dir = dir
+	localDB := &DB{}
+	localDB.Dir = dir
 
 	_, logger := log.WithCtx(ctx)
 
-	logger.PushPrefix(fmt.Sprintf("open db in: %s", dir))
+	logger.PushPrefix(fmt.Sprintf("open localDB in: %s", dir))
 
 	dbPath := filepath.Join(exe.AbsDir, dir)
 	if err := os.MkdirAll(dbPath, 0755); err != nil {
@@ -48,9 +80,9 @@ func New(ctx context.Context, dir string) (*DB, error) {
 		return nil, err
 	}
 
-	db.Underlying = underlying
+	localDB.Underlying = underlying
 
-	return db, nil
+	return localDB, nil
 }
 
 // Backup path 返回此次生成的备份文件相对于 elt 服务运行目录的相对路径及备份文件名

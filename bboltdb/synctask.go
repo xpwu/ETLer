@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/xpwu/ETLer/etl/db"
+	"github.com/xpwu/go-log/log"
 	"go.etcd.io/bbolt/errors"
 
 	"github.com/xpwu/ETLer/x"
@@ -175,12 +176,20 @@ type SyncTask struct {
 	db *bbolt.DB
 }
 
-func NewSyncTask(ctx context.Context, db *DB) *SyncTask {
-	_ = db.Underlying.Update(func(tx *bbolt.Tx) error {
+func NewSyncTask(ctx context.Context, db *DB) (st *SyncTask, err error) {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("NewSyncTask")
+
+	err = db.Underlying.Update(func(tx *bbolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists([]byte(stBucketName))
 		return err
 	})
-	return &SyncTask{db.Underlying}
+	if err != nil {
+		logger.Error(err)
+		return nil, err
+	}
+
+	return &SyncTask{db.Underlying}, nil
 }
 
 func (s *SyncTask) All(ctx context.Context) db.SyncTaskIterator {
