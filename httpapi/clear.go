@@ -16,7 +16,7 @@ func (s *suite) APIClearWC(ctx context.Context, request *clearReq) *api.EmptyRes
 	ctx, logger := log.WithCtx(ctx)
 	logger.PushPrefix("api Clear")
 
-	db.WatchCollection().DelAll(ctx)
+	db.WatchCollection().Clear(ctx)
 	etl.WatchCollectionUpdated()
 
 	return &api.EmptyResponse{}

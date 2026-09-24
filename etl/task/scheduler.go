@@ -181,12 +181,15 @@ func updateSyncTask(ctx context.Context, delta SyncTaskDelta) {
 }
 
 func backFillSyncTaskify(ctx context.Context) {
-	if db.WatchCollection().NeedFullSyncing(ctx) {
+	wc := db.WatchCollection()
+
+	if wc.NeedFullSyncing(ctx) {
 		fullSyncTaskify(ctx)
 		return
 	}
 
-	if db.WatchCollection().LatestVersion(ctx) != db.WatchCollection().LatestSynced(ctx) {
+	// 只要最后一个版本没有同步，不管是否有 delta syncing 标记，都得做 delta sync
+	if wc.LatestVersion(ctx) != wc.LatestSynced(ctx) {
 		deltaSyncTaskify(ctx)
 	}
 }
@@ -221,7 +224,7 @@ func deltaSyncTaskify(ctx context.Context) {
 	// 必须先把 syncing 的任务化完，再任务化 latest。如果直接任务化 latest, 那么之前未完成版本而添加的 task 可以会多余。
 	// v1 = {A, B, C}  v2 = {A, D}   v3 = {A, B, C, E}
 	// v2 如果没有做完而直接做 v3，那么v2可能添加的 D 将无法从任务中删除，因为 v3 - v1 = {add:[E], del:[]}
-	syncing, need := db.WatchCollection().NeedDeltaSyncing(ctx)
+	syncing, need := db.WatchCollection().NeedSyncing(ctx)
 	if need && syncing < latestSynced {
 		// error
 		logger.Error("syncing(", syncing, ") < latestSynced(", latestSynced, ")")
@@ -242,7 +245,7 @@ func deltaSyncTaskify(ctx context.Context) {
 		return
 	}
 
-	db.WatchCollection().MarkDeltaSyncing(ctx, latestVer)
+	db.WatchCollection().MarkSyncing(ctx, latestVer)
 	latest := db.WatchCollection().Get(ctx, latestVer)
 	updateSyncTask(ctx, diffSyncTask(latest, latestSyncedWc))
 	db.WatchCollection().ClearSyncingAndMarkSynced(ctx, latestVer)
