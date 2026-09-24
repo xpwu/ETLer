@@ -21,10 +21,10 @@ type SyncTaskIterator interface {
 	// Err 如果 context.Canceled, Err() 将返回此错误
 	// nil if no error has occurred.
 	Err() error
-	Release()
+	Release(ctx context.Context)
 }
 
-// SyncTaskDBer 无需支持并发
+// SyncTaskDBer 无需支持并发，但在迭代器 Next() 遍历期间，会调用 InsertOrUpdate 更新 Current() 的 Task
 // 已经同步完的 Task 需要调用 Del / DelBatch 删除
 // 只同步了部分文档的 Task 需要重置该 Task 的 UntilDocId 后，调用 InsertOrUpdate / InsertOrUpdateBatch 更新该 Task
 type SyncTaskDBer interface {
@@ -36,7 +36,8 @@ type SyncTaskDBer interface {
 
 	Del(ctx context.Context, id string)
 	DelBatch(ctx context.Context, ids []string)
-	DelAll(ctx context.Context)
+
+	Clear(ctx context.Context)
 }
 
 var syncTask SyncTaskDBer
