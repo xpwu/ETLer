@@ -1,9 +1,9 @@
 module github.com/xpwu/ETLer
 
-go 1.19
+go 1.25.0
 
 require (
-	github.com/stretchr/testify v1.6.1
+	github.com/stretchr/testify v1.11.1
 	github.com/syndtr/goleveldb v1.0.0
 	github.com/xpwu/go-cmd v0.5.0
 	github.com/xpwu/go-config v0.1.0
@@ -12,6 +12,8 @@ require (
 	github.com/xpwu/go-mongodb v0.3.4
 	github.com/xpwu/go-tinyserver v0.2.0
 	github.com/xpwu/go-x v0.3.0
+	go.etcd.io/bbolt v1.5.0
+	go.mongodb.org/mongo-driver/v2 v2.8.0
 )
 
 require (
@@ -26,9 +28,9 @@ require (
 	github.com/xpwu/go-reqid v0.1.0 // indirect
 	github.com/xpwu/go-xnet v0.1.2 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
-	go.mongodb.org/mongo-driver/v2 v2.8.0 // indirect
 	golang.org/x/crypto v0.33.0 // indirect
-	golang.org/x/sync v0.11.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
-	gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
