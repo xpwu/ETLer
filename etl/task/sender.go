@@ -127,7 +127,7 @@ func (s *Sender) Stop() {
 // err context.Canceled, ErrSendFailed or unknown
 func (s *Sender) sync() error {
 	iter := db.SyncTask().All(s.ctx)
-	defer iter.Release()
+	defer iter.Release(s.ctx)
 
 	for iter.Next(s.ctx) {
 		task := iter.Current()
@@ -188,7 +188,7 @@ func (s *Sender) sync() error {
 // err context.Canceled, ErrSendFailed, ErrNotFoundSentPoint or unknown
 func (s *Sender) sendChangeStream() error {
 	iter := db.ChangeStream().AllNotSent(s.ctx)
-	defer iter.Release()
+	defer iter.Release(s.ctx)
 
 	for iter.Next(s.ctx, s.batch) {
 		err := netLayer.Send(s.ctx, ChangeStream, "", "", iter.Values())
