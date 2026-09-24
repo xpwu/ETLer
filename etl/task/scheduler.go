@@ -203,6 +203,9 @@ func fullSyncTaskify(ctx context.Context) {
 	db.SyncTask().DelAll(ctx)
 	db.SyncTask().InsertOrUpdateBatch(ctx, add)
 
+	// 因为全同步，这之前的 change stream 都可以标记为已发送
+	db.ChangeStream().MarkSentUpTo(ctx, db.ChangeStream().LastStreamId())
+
 	db.WatchCollection().ClearSyncingAndMarkSynced(ctx, version)
 }
 
