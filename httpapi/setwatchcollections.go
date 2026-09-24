@@ -26,7 +26,7 @@ func (s *suite) APISetWatchCols(ctx context.Context, request *setWcReq) *setWcRe
 	old, now := db.WatchCollection().Save(ctx, request.WatchInfos, request.Version)
 	logger.Info(fmt.Sprintf("expect version: %d, result: old=%d, now=%d"), request.Version, old, now)
 
-	if now != request.Version {
+	if old != request.Version && now == request.Version {
 		etl.WatchCollectionUpdated()
 	}
 
