@@ -30,7 +30,7 @@ type ChangeStreamIterator interface {
 	// nil if no error has occurred.
 	// or unknown error
 	Err() error
-	Release()
+	Release(ctx context.Context)
 }
 
 // ChangeStreamDBer Save / DeleteAll 不会被并发调用，这两个方法相互之间也不会并发调用，

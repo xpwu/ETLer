@@ -373,7 +373,7 @@ func (it *ChangeStreamIter) Next(ctx context.Context, limit int) bool {
 	if len(it.values) == 0 {
 		it.exhausted = true
 		// 耗完就该释放
-		it.Release()
+		it.Release(ctx)
 		return false
 	}
 	return true
@@ -394,7 +394,7 @@ func (it *ChangeStreamIter) Err() error {
 	return it.err
 }
 
-func (it *ChangeStreamIter) Release() {
+func (it *ChangeStreamIter) Release(ctx context.Context) {
 	if it.released {
 		return
 	}
