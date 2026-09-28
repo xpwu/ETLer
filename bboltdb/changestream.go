@@ -13,22 +13,27 @@ import (
 const csBucketName = "changestream"
 
 const (
-	csKeyLastSent = "lastsent"
+	csKeyPrefixStream = "stream:"
+	csKeyStreamFmt    = "%016x"
+	csKeyLastSent     = "lastsent"
+
+	// 阈值：已发送未清理的数量超过此值时触发 compact
+	csCompactThreshold = uint64(1000)
 )
 
-// 阈值：已发送未清理的数量超过此值时触发 compact
-const csCompactThreshold = uint64(1000)
-
 func csKeyStream(id uint64) []byte {
-	return []byte(fmt.Sprintf("stream:%016x", id))
+	return []byte(fmt.Sprintf(csKeyPrefixStream+csKeyStreamFmt, id))
 }
 
 func csParseStreamKey(k []byte) (uint64, bool) {
-	if len(k) != 24 || string(k[:7]) != "stream:" {
+	if len(k) != len(csKeyPrefixStream)+16 {
+		return 0, false
+	}
+	if string(k[:len(csKeyPrefixStream)]) != csKeyPrefixStream {
 		return 0, false
 	}
 	var id uint64
-	_, err := fmt.Sscanf(string(k[7:]), "%016x", &id)
+	_, err := fmt.Sscanf(string(k[len(csKeyPrefixStream):]), csKeyStreamFmt, &id)
 	return id, err == nil
 }
 
@@ -154,6 +159,22 @@ func (c *ChangeStream) MarkSentUpTo(ctx context.Context, id db.StreamId) {
 			if streamId <= cur {
 				return nil // 不回退
 			}
+		}
+
+		// 已发送点之后紧跟着的连续 nil 数据，既然不需要发送，就等价于"已经处理完"
+		cursor := b.Cursor()
+		for k, v := cursor.Seek(csKeyStream(streamId + 1)); k != nil; k, v = cursor.Next() {
+			id, ok := csParseStreamKey(k)
+			if !ok {
+				break
+			}
+
+			if entry := csDecodeEntry(v); entry != nil && len(entry.value) != 0 {
+				break // 第一条有效数据，停下；有效数据不能跨过：它还没发送
+			}
+
+			// 只有不需要发送的 nil 才等价于已处理完
+			streamId = id
 		}
 
 		wrote = true
@@ -358,9 +379,10 @@ func (it *ChangeStreamIter) Next(ctx context.Context, limit int) bool {
 		}
 
 		entry := csDecodeEntry(v)
-		if entry == nil {
+		if entry == nil || len(entry.value) == 0 {
 			continue
 		}
+
 		it.values = append(it.values, entry.value)
 		it.lastId = csUint64ToBytes(id)
 		count++
