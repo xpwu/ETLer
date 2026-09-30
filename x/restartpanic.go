@@ -69,7 +69,7 @@ func AutoRestartPanic(startAndBlock func(context.Context) error, options ...Opti
 			}()
 
 			if err == nil {
-				logger.Error("crashed! Will be restarted automatically after 5s")
+				logger.Error(fmt.Sprintf("crashed! Will be restarted automatically after %s", opt.duration))
 				time.Sleep(opt.duration)
 			} else {
 				logger.Fatal(fmt.Sprintf("stopped! Not Served! Because error: %v", err))

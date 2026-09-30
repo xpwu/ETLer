@@ -100,6 +100,7 @@ func startAndBlock(ctx context.Context) error {
 			case UnknownErr:
 				logger.Error("unknown err, restart after 5s")
 				time.Sleep(5 * time.Second)
+				sender.Start()
 			}
 		case ack := <-changestream.NeedForceSync():
 			sender.Stop()
@@ -271,6 +272,7 @@ func InitTaskFromConfig(ctx context.Context) (succeed bool) {
 	updateSyncTask(ctx, diffSyncTask(config.Watch.Collections, old))
 
 	// 必须最后保存此项，防止前面异常出错
+	db.WatchCollection().Clear(ctx)
 	db.WatchCollection().Save(ctx, config.Watch.Collections, db.ConfigVersion)
 	db.WatchCollection().ClearSyncingAndMarkSynced(ctx, db.ConfigVersion)
 

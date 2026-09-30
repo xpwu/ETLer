@@ -159,7 +159,7 @@ func (s *Sender) sync() error {
 				err = netLayer.Send(s.ctx, Sync, task.DB, task.Collection, all)
 			}
 			if err != nil {
-				s.logger.Warning("change stream sender failed: " + err.Error())
+				s.logger.Warning("sync sender failed: " + err.Error())
 				return err
 			}
 

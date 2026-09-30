@@ -15,25 +15,25 @@ import (
 const wcBucketName = "watchcollection"
 
 const (
-	wcKeyPrefixVersion = "version:%016x"
+	wcKeyPrefixVersion = "version:"
+	wcKeyVersionFmt    = "%016x"
 	wcKeyMetaSyncing   = "meta:syncing"
 	wcKeyMetaSynced    = "meta:latest_synced"
 )
 
-func wcVersionKey(version uint64) []byte {
-	return []byte(fmt.Sprintf(wcKeyPrefixVersion, version))
+func wcVersionKey(v uint64) []byte {
+	return []byte(fmt.Sprintf(wcKeyPrefixVersion+wcKeyVersionFmt, v))
 }
 
 func wcParseVersionKey(k []byte) (uint64, bool) {
-	prefix := []byte("version:")
-	if len(k) < len(prefix)+16 {
+	if len(k) != len(wcKeyPrefixVersion)+16 {
 		return 0, false
 	}
-	if string(k[:len(prefix)]) != "version:" {
+	if string(k[:len(wcKeyPrefixVersion)]) != wcKeyPrefixVersion {
 		return 0, false
 	}
 	var id uint64
-	_, err := fmt.Sscanf(string(k[len(prefix):]), "%016x", &id)
+	_, err := fmt.Sscanf(string(k[len(wcKeyPrefixVersion):]), wcKeyVersionFmt, &id)
 	return id, err == nil
 }
 
@@ -170,10 +170,12 @@ func (w *WatchCollection) Save(ctx context.Context, info []x.WatchInfo, version 
 
 		// 找当前最大 version
 		var curMax uint64
+		var hasVersion bool
 		cursor := b.Cursor()
 		for k, _ := cursor.Last(); k != nil; k, _ = cursor.Prev() {
 			if id, ok := wcParseVersionKey(k); ok {
 				curMax = id
+				hasVersion = true
 				break
 			}
 		}
@@ -181,7 +183,7 @@ func (w *WatchCollection) Save(ctx context.Context, info []x.WatchInfo, version 
 		oldVersion = curMax
 
 		// version 守卫：latestVersion >= version 不修改
-		if curMax >= version {
+		if hasVersion && curMax >= version {
 			nowVersion = curMax
 			return nil
 		}
