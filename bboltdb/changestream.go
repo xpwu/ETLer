@@ -341,9 +341,11 @@ func (it *ChangeStreamIter) Next(ctx context.Context, limit int) bool {
 		return false
 	}
 
+	// 库中还没有任何数据：此时不会有 lastsent，也就无从谈起"找不到已发送点"，
+	// 这不是错误，只是还没有数据可发送，所以返回 false 且 Err() == nil。
+	// 首次启动时就是这种状态，在现在版本的调用方来看，等 initWatching 保存第一条数据后即可正常迭代。
 	firstKey, _ := b.Cursor().First()
 	if firstKey == nil {
-		// empty
 		it.Release(ctx)
 		return false
 	}
