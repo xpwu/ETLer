@@ -122,6 +122,7 @@ type syncTaskIter struct {
 	current  db.Task
 	err      error
 	released bool
+	started  bool
 }
 
 func (it *syncTaskIter) Next(ctx context.Context) bool {
@@ -136,7 +137,15 @@ func (it *syncTaskIter) Next(ctx context.Context) bool {
 	default:
 	}
 
-	k, v := it.cursor.Next()
+	// bbolt 的 cursor 必须先定位(First/Seek/Last)后才能 Next，
+	// 新 cursor 直接 Next 会返回 nil，所以首次调用用 First()
+	var k, v []byte
+	if !it.started {
+		it.started = true
+		k, v = it.cursor.First()
+	} else {
+		k, v = it.cursor.Next()
+	}
 	if k == nil {
 		return false
 	}
@@ -208,9 +217,6 @@ func (s *SyncTask) All(ctx context.Context) db.SyncTaskIterator {
 		tx:     tx,
 		cursor: b.Cursor(),
 	}
-
-	// cursor 定位到第一条之前，Next 里调 cursor.Next()
-	// bbolt cursor 初始位置在第一个 key 之前，所以 Next 里直接 cursor.Next() 即可
 
 	return iter
 }
