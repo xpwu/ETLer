@@ -161,6 +161,11 @@ func (c *ChangeStream) MarkSentUpTo(ctx context.Context, id db.StreamId) {
 			}
 		}
 
+		if b.Get(csKeyStream(streamId)) == nil {
+			// 不存在 id 对应的 item，不做任何操作
+			return nil
+		}
+
 		// 已发送点之后紧跟着的连续 nil 数据，既然不需要发送，就等价于"已经处理完"
 		cursor := b.Cursor()
 		for k, v := cursor.Seek(csKeyStream(streamId + 1)); k != nil; k, v = cursor.Next() {
@@ -332,7 +337,14 @@ func (it *ChangeStreamIter) Next(ctx context.Context, limit int) bool {
 
 	b := tx.Bucket([]byte(csBucketName))
 	if b == nil {
-		it.exhausted = true
+		it.Release(ctx)
+		return false
+	}
+
+	firstKey, _ := b.Cursor().First()
+	if firstKey == nil {
+		// empty
+		it.Release(ctx)
 		return false
 	}
 

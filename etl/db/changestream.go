@@ -12,12 +12,20 @@ type StreamValue = bson.Raw
 type ResumeToken = bson.Raw
 
 var (
-	ErrNotFoundSentPoint = errors.New("Not Found change stream sent point in DB")
+	ErrNotFoundSentPoint = errors.New("not found change stream sent point in DB")
 )
 
 type ChangeStreamIterator interface {
 
 	// Next 第一次也必须调用 Next, Values() 才会有值。迭代完数据库中已有的值或者有错，返回 false
+	// limit 表示本次最多返回多少个 value，实际返回的个数可以小于 limit
+	//
+	// 返回 false 表示没有更多可发送的数据（或者有错），此时不能再调用 Values()
+	// 返回 true 表示 Values() 中至少有一个 value，即不会出现"成功但无数据"的情况，
+	// 所以调用者只需要 for Next() 后直接使用 Values()，无需再判断 len(Values()) == 0
+	//
+	// 数据库中没有任何数据时（包括一条都没有、或者仅有已发送点且其后无新数据），
+	// 返回 false 且 Err() == nil，这是正常的空状态，不是错误
 	Next(ctx context.Context, limit int) (ok bool)
 
 	// Values 必须按照 Save 顺序返回，value 都是有效的，不存在nil
@@ -43,6 +51,7 @@ type ChangeStreamDBer interface {
 	DeleteAll(ctx context.Context)
 
 	// MarkSentUpTo 标记已发的截止 StreamId，表示在 id 之前的(也包括 id 本身这一条)都已发送
+	// 如果 DB 中不存在 id 对应的数据，不做任何操作
 	MarkSentUpTo(ctx context.Context, id StreamId)
 	// AllNotSent 所有还没有发送的 change stream 数据
 	AllNotSent(ctx context.Context) ChangeStreamIterator
