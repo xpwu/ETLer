@@ -142,7 +142,6 @@ func (c *ChangeStream) Save(ctx context.Context, resumeToken db.ResumeToken, val
 		return nil, err
 	}
 
-	logger.Debug(fmt.Sprintf("resume token: %s, value: %s", resumeToken, value))
 	return id, nil
 }
 
