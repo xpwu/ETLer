@@ -14,11 +14,19 @@ import (
 
 // newTestDB 所有测试共用的临时 bbolt 实例。
 // 不使用 New()，因为 New 依赖 exe.AbsDir，测试环境下路径不可控。
+//
+// NoSync/NoFreelistSync/InitialMmapSize 只影响持久化时机与 mmap 扩容，
+// 同一进程内后续事务依然能读到已提交的数据，因此不影响任何断言。
+// 不加这些选项时，两个 Compact 用例共 2000 次 Save 会触发 2000 次 fdatasync（约 12 秒）。
 func newTestDB(t *testing.T) *DB {
 	t.Helper()
 
 	dir := t.TempDir()
-	underlying, err := bbolt.Open(filepath.Join(dir, "test.db"), 0600, nil)
+	underlying, err := bbolt.Open(filepath.Join(dir, "test.db"), 0600, &bbolt.Options{
+		NoSync:          true,
+		NoFreelistSync:  true,
+		InitialMmapSize: 64 << 20, // 64MB，避免反复 mmap 扩容带来的 msync
+	})
 	if err != nil {
 		t.Fatalf("open bbolt failed: %v", err)
 	}
