@@ -58,6 +58,7 @@ func (h *HttpNetLayer) Send(ctx context.Context, ty Type, db, coll string, data 
 
 	for _, url_ := range config.Watch.SendToUrls {
 		logger.PushPrefix(fmt.Sprintf("to: %s", url_))
+		log.Debug("start")
 		err = h.doOne(ctx, r, url_)
 		var urlErr *url.Error
 		if errors.As(err, &urlErr) && urlErr.Timeout() {
@@ -65,9 +66,11 @@ func (h *HttpNetLayer) Send(ctx context.Context, ty Type, db, coll string, data 
 			err = h.doOne(ctx, r, url_)
 		}
 		if ctx.Err() == context.Canceled {
+			logger.Warning("canceled")
 			return context.Canceled
 		}
 		if err == nil {
+			logger.Info("succeed")
 			return
 		}
 		logger.PopPrefix()

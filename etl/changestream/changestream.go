@@ -55,12 +55,15 @@ func startAndBlock(ctx context.Context) error {
 	}
 
 	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("ChangeStreamServer")
+	logger.Info("start")
 	ctx, cancel := context.WithCancel(ctx)
 
 	go func() {
 		select {
 		case <-watchCollectionUpdated:
 			// stop watching stream, and wait for restarting
+			logger.Debug("WatchCollection is updated, canceling")
 			cancel()
 			logger.Debug("WatchCollection is updated, wait for restarting")
 		}
@@ -82,17 +85,22 @@ func startAndBlock(ctx context.Context) error {
 	for {
 		var streamErr *StreamError
 
+		logger.Info("get ResumeToken from local db")
+
 		resumeToken := db.ChangeStream().ResumeToken(ctx)
 		if resumeToken == nil {
+			logger.Info("resumeToken == nil, will init watching")
 			resumeToken, streamErr = initWatching(ctx, mongoClient)
 		}
 
 		if streamErr == nil {
+			logger.Info("resumeToken != nil, will watch")
 			streamErr = watch(ctx, mongoClient, resumeToken)
 		}
 
 		switch {
 		case streamErr.Is(ErrTokenExpired):
+			logger.Error("Resume Token Expired, delete all and retry")
 			db.ChangeStream().DeleteAll(ctx)
 			time.Sleep(1 * time.Second)
 		case streamErr.Is(ErrRetryBackoff) || streamErr.Is(ErrStopForOps):
@@ -100,10 +108,14 @@ func startAndBlock(ctx context.Context) error {
 		default: // ErrShuttingDown, ErrRetryNow - retry now
 			time.Sleep(1 * time.Second)
 		}
+		logger.Info("stream err, retry server")
 	}
 }
 
 func watch(ctx context.Context, client *mongo.Client, resumeToken bson.Raw) *StreamError {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("watch")
+
 	csr := newCsr(ctx, client)
 
 	// *** option 与 pipeline 不要修改， 否则可能有未知异常 ***
@@ -111,12 +123,14 @@ func watch(ctx context.Context, client *mongo.Client, resumeToken bson.Raw) *Str
 		options.ChangeStream().SetFullDocument(options.UpdateLookup).SetStartAfter(resumeToken))
 
 	if err != nil {
+		logger.Error(err)
 		return AsStreamError(err, false)
 	}
 
 	for cs.Next(ctx) {
 		streamErr := csr.processStream(cs)
 		if streamErr != nil {
+			logger.Error(streamErr)
 			return streamErr
 		}
 	}
@@ -127,10 +141,12 @@ func watch(ctx context.Context, client *mongo.Client, resumeToken bson.Raw) *Str
 // initWatching resumeToken 最后保存到的那个 ResumeToken
 func initWatching(ctx context.Context, client *mongo.Client) (resumeToken bson.Raw, stErr *StreamError) {
 	ctx, logger := log.WithCtx(ctx)
-	logger.Info("init watching ... ")
+	logger.PushPrefix("init watching")
+	logger.Info("start")
 	cs, err := client.Watch(ctx, mongo.Pipeline{},
 		options.ChangeStream().SetFullDocument(options.UpdateLookup).SetStartAtOperationTime(&bson.Timestamp{T: 1}))
 	if err != nil {
+		logger.Error(fmt.Sprintf("watch error. %s", err.Error()))
 		return nil, AsStreamError(err, false)
 	}
 
@@ -139,6 +155,7 @@ func initWatching(ctx context.Context, client *mongo.Client) (resumeToken bson.R
 		resumeToken = cs.ResumeToken()
 	}
 	if resumeToken == nil {
+		logger.Error("watch error: resumeToken = nil")
 		return nil, &StreamError{
 			Code:   ErrRetryBackoff.Code,
 			Reason: "init watching: resumeToken = nil",
@@ -153,10 +170,12 @@ func initWatching(ctx context.Context, client *mongo.Client) (resumeToken bson.R
 	// 必须等待 sync ack 才能保存 resumeToken, 否则可能出现 sync 丢失的情况
 	id, err := db.ChangeStream().Save(ctx, resumeToken, nil)
 	if err != nil {
+		logger.Error(fmt.Sprintf("save error. %s", err.Error()))
 		return nil, AsStreamError(err, false)
 	}
 	db.ChangeStream().MarkSentUpTo(ctx, id)
 
+	logger.Info("succeed")
 	return resumeToken, AsStreamError(cs.Err(), false)
 }
 
@@ -198,9 +217,11 @@ func (e *event) String() string {
 
 func (csr *changeStreamRunner) processStream(cs *mongo.ChangeStream) *StreamError {
 	_, logger := log.WithCtx(csr.ctx)
+	logger.PushPrefix("processStream")
 
 	resumeToken := cs.ResumeToken()
 	if resumeToken == nil {
+		logger.Error("mongo.ChangeStream.ResumeToken() == nil")
 		return &StreamError{
 			Code:   ErrRetryBackoff.Code,
 			Reason: "processStream: resumeToken = nil",
@@ -210,6 +231,7 @@ func (csr *changeStreamRunner) processStream(cs *mongo.ChangeStream) *StreamErro
 	ce := &event{}
 	err := cs.Decode(ce)
 	if err != nil {
+		logger.Error(fmt.Sprintf("mongo.ChangeStream.Decode() err. %s", err.Error()))
 		return AsStreamError(err, false)
 	}
 
@@ -221,18 +243,22 @@ func (csr *changeStreamRunner) processStream(cs *mongo.ChangeStream) *StreamErro
 	logger.Debug("watched: ", ce.String())
 
 	if csr.watchColl[cid] && ce.OperationType != "invalidate" {
+		logger.Debug("save resumeToken and changeStream")
 		_, err = db.ChangeStream().Save(csr.ctx, resumeToken, cs.Current)
 		if err != nil {
+			logger.Error(fmt.Sprintf("db.ChangeStream().Save(resumeToken, changeStream) err. %s", err.Error()))
 			return AsStreamError(err, false)
 		}
-		logger.Info("save change stream: ", ce.String())
+		logger.Info("saved resumeToken and changeStream: ", ce.String())
 		postStreamChanged()
 	} else {
+		logger.Debug(ce.String(), "is NOT in the Watching Collections, will only save resumeToken")
 		_, err = db.ChangeStream().Save(csr.ctx, resumeToken, nil)
 		if err != nil {
+			logger.Error(fmt.Sprintf("db.ChangeStream().Save(resumeToken, nil) err. %s", err.Error()))
 			return AsStreamError(err, false)
 		}
-		logger.Debug(ce.String(), " is NOT in the Watching Collections, so it's discarded")
+		logger.Info("only saved resumeToken. ", ce.String())
 	}
 
 	return AsStreamError(cs.Err(), ce.OperationType == "invalidate")
