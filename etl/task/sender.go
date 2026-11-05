@@ -2,43 +2,53 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"github.com/xpwu/ETLer/etl/db"
 	"github.com/xpwu/go-log/log"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"sync"
 )
 
-var netLayer NetLayer = &HttpNetLayer{}
-
-func SetNetLayer(layer NetLayer) {
-	netLayer = layer
-}
-
 // Sender 只发送当前已有的同步任务或获取到的已缓存的 stream，发送完即自动停止，不等待也不判断是否未来还需要有发送的数据
-// Sender 不是并发安全的
+// Start Stop 是并发安全的，可以多次重复调用
 type Sender struct {
 	rawCtx   context.Context
 	ctx      context.Context
 	client   *mongo.Client
-	cancel   chan context.CancelFunc
-	logger   *log.Logger
+	netLayer NetLayer
+
+	//logger   *log.Logger
 	batch    int
 	doneChan chan SenderCode
-	addOne   chan struct{}
+
+	// isBusy: cancelF != nil || stoppedSig is not closed
+	mutex      sync.Mutex
+	cancelF    context.CancelFunc
+	stoppedSig chan struct{}
 }
 
 func NewSender(ctx context.Context, client *mongo.Client, batch int) *Sender {
+	return NewSender2(ctx, client, batch, &HttpNetLayer{})
+}
+
+func NewSender2(ctx context.Context, client *mongo.Client, batch int, netLayer NetLayer) *Sender {
 	s := &Sender{
-		client:   client,
-		cancel:   make(chan context.CancelFunc, 1),
-		batch:    batch,
-		doneChan: make(chan SenderCode, 1),
+		client:     client,
+		batch:      batch,
+		doneChan:   make(chan SenderCode, 1),
+		stoppedSig: make(chan struct{}),
+		netLayer:   netLayer,
 	}
 
-	s.rawCtx, s.logger = log.WithCtx(ctx)
-	s.logger.PushPrefix("runner")
+	// 默认是 stopped
+	close(s.stoppedSig)
 
+	ctx, logger := log.WithCtx(ctx)
+	s.rawCtx = ctx
+
+	logger.PushPrefix("Sender")
 	s.ctx = s.rawCtx
 
 	return s
@@ -54,18 +64,25 @@ const (
 	UnknownErr
 )
 
-func (s *Sender) Done() <-chan SenderCode {
-	return s.doneChan
+func SenderCodeStr(code SenderCode) string {
+	switch code {
+	case Ok:
+		return "OK"
+	case ByStopped:
+		return "ByStopped"
+	case NeedForceSync:
+		return "NeedForceSync"
+	case SendFailed:
+		return "SendFailed"
+	case UnknownErr:
+		return "UnknownErr"
+	default:
+		return "UnknownCode"
+	}
 }
 
-func (s *Sender) cancelSafely() (canceled bool) {
-	select {
-	case cancel := <-s.cancel:
-		cancel()
-		return true
-	default:
-		return false
-	}
+func (s *Sender) Done() <-chan SenderCode {
+	return s.doneChan
 }
 
 func (s *Sender) done(code SenderCode) {
@@ -75,53 +92,99 @@ func (s *Sender) done(code SenderCode) {
 	}
 }
 
-// Start 时序很重要，sync 与 send change stream 都是串行处理，每一批也都是串行处理，即使是停止，也必须等待停止后，才能新启动
-// 一定是先 sync 再 send change stream
-// Start 与 Stop 都不是并发安全的，但是非并发地重复调用 Start 是安全的
+// Start 并发安全
 func (s *Sender) Start() (isBusy bool) {
-	ctx, cancel := context.WithCancel(s.rawCtx)
-	select {
-	case s.cancel <- cancel:
-	default:
-		// running
-		isBusy = true
-		return
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if s.cancelF != nil {
+		return true
 	}
-	s.ctx = ctx
+	select {
+	case <-s.stoppedSig:
+	default:
+		return true
+	}
+
+	s.ctx, s.cancelF = context.WithCancel(s.rawCtx)
+	s.stoppedSig = make(chan struct{})
 
 	go func() {
+		// exhaust s.doneChan
+		select {
+		case <-s.doneChan:
+		default:
+		}
+
 		err := s.sync()
 		if err == nil {
 			err = s.sendChangeStream()
 		}
 
 		// clear cancel chan
-		s.cancelSafely()
 
-		switch err {
-		case ErrSendFailed:
-			s.done(SendFailed)
-		case db.ErrNotFoundSentPoint:
-			s.done(NeedForceSync)
-		case context.Canceled:
-			s.done(ByStopped)
-		case nil:
-			s.done(Ok)
-		default:
-			s.done(UnknownErr)
+		s.mutex.Lock()
+		canceled := s.cancelF != nil
+		if canceled {
+			s.cancelF()
+			s.cancelF = nil
 		}
+		stoppedSig := s.stoppedSig
+		s.mutex.Unlock()
+
+		// 先发停止信号，再根据需要向外发出事件通知
+		close(stoppedSig)
+
+		// 是本 go func 停止的，就对外发出事件通知
+		if canceled {
+			switch err {
+			case ErrSendFailed:
+				s.done(SendFailed)
+			case db.ErrNotFoundSentPoint:
+				s.done(NeedForceSync)
+			case context.Canceled:
+				s.done(ByStopped)
+			case nil:
+				s.done(Ok)
+			default:
+				s.done(UnknownErr)
+			}
+		}
+
 	}()
 
 	return false
 }
 
-// Stop 与 Start 都不是并发安全的，但是非并发地重复调用 Stop 是安全的
+// Stop 并发安全
 func (s *Sender) Stop() {
-	if s.cancelSafely() {
-		s.logger.Info("will stop")
-		// wait stopped
-		<-s.Done()
+	_, logger := log.WithCtx(s.ctx)
+	s.mutex.Lock()
+	if s.cancelF != nil {
+		logger.Info("will stop")
+		s.cancelF()
+		s.cancelF = nil
 	}
+
+	stoppedSig := s.stoppedSig
+	s.mutex.Unlock()
+
+	// 必须先解锁，再等待，防止死锁
+	<-stoppedSig
+}
+
+// StopNotWait 并发安全
+func (s *Sender) StopNotWait() (stopped <-chan struct{}) {
+	_, logger := log.WithCtx(s.ctx)
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.cancelF != nil {
+		logger.Info("will stop")
+		s.cancelF()
+		s.cancelF = nil
+	}
+
+	return s.stoppedSig
 }
 
 // err context.Canceled, ErrSendFailed or unknown
@@ -129,25 +192,31 @@ func (s *Sender) sync() error {
 	iter := db.SyncTask().All(s.ctx)
 	defer iter.Release(s.ctx)
 
-	for iter.Next(s.ctx) {
+	ctx, logger := log.WithCtx(s.ctx)
+	logger.Info("check SyncTask")
+
+	for iter.Next(ctx) {
 		task := iter.Current()
 		coll := s.client.Database(task.DB).Collection(task.Collection)
 		docId := task.UntilDocId
 
+		logger.PushPrefix(fmt.Sprintf("SyncTask:%s", task.Id()))
+		logger.Info("send...")
+
 		for {
-			cursor, err := coll.Find(s.ctx, bson.D{{"_id", bson.D{{"$gt", docId}}}},
+			cursor, err := coll.Find(ctx, bson.D{{"_id", bson.D{{"$gt", docId}}}},
 				options.Find().SetLimit(int64(s.batch)).SetSort(bson.D{{"_id", 1}}))
 			if err == context.Canceled {
-				s.logger.Debug(err)
+				logger.Debug(err)
 				return err
 			}
 			if err != nil {
-				s.logger.Error(err)
+				logger.Error(err)
 				return err
 			}
 
 			all := make([]bson.Raw, 0, s.batch)
-			for cursor.Next(s.ctx) {
+			for cursor.Next(ctx) {
 				docId = cursor.Current.Lookup("_id")
 				all = append(all, cursor.Current)
 			}
@@ -156,10 +225,10 @@ func (s *Sender) sync() error {
 			}
 
 			if len(all) != 0 {
-				err = netLayer.Send(s.ctx, Sync, task.DB, task.Collection, all)
+				err = s.netLayer.Send(ctx, Sync, task.DB, task.Collection, all)
 			}
 			if err != nil {
-				s.logger.Warning("sync sender failed: " + err.Error())
+				logger.Warning("sync sender failed: " + err.Error())
 				return err
 			}
 
@@ -167,20 +236,24 @@ func (s *Sender) sync() error {
 
 			// finished
 			if len(all) < s.batch && err == nil {
-				db.SyncTask().Del(s.ctx, task.Id())
+				db.SyncTask().Del(ctx, task.Id())
 				break
 			}
 
 			if err != nil {
-				s.logger.Error("cursor error.", err)
+				logger.Error("cursor error.", err)
 				return err
 			}
 
 			// update
 			task.UntilDocId = docId
-			db.SyncTask().InsertOrUpdate(s.ctx, task)
+			db.SyncTask().InsertOrUpdate(ctx, task)
 		}
+
+		logger.PopPrefix()
 	}
+
+	logger.Info("SyncTask end")
 
 	return nil
 }
@@ -190,16 +263,21 @@ func (s *Sender) sendChangeStream() error {
 	iter := db.ChangeStream().AllNotSent(s.ctx)
 	defer iter.Release(s.ctx)
 
-	for iter.Next(s.ctx, s.batch) {
-		err := netLayer.Send(s.ctx, ChangeStream, "", "", iter.Values())
+	ctx, logger := log.WithCtx(s.ctx)
+	logger.Info("check ChangeStreamTask")
+
+	for iter.Next(ctx, s.batch) {
+		err := s.netLayer.Send(ctx, ChangeStream, "", "", iter.Values())
 
 		if err != nil {
-			s.logger.Warning("change stream send failed: " + err.Error())
+			logger.Warning("change stream send failed: " + err.Error())
 			return err
 		}
 
-		db.ChangeStream().MarkSentUpTo(s.ctx, iter.LastStreamId())
+		db.ChangeStream().MarkSentUpTo(ctx, iter.LastStreamId())
 	}
+
+	logger.Info("ChangeStream end")
 
 	return iter.Err()
 }
