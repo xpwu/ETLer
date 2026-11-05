@@ -62,6 +62,8 @@ func startAndBlock(ctx context.Context) error {
 	}
 
 	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("scheduler")
+
 	var mongoClient *mongo.Client
 
 	for {
@@ -86,6 +88,7 @@ func startAndBlock(ctx context.Context) error {
 	for {
 		select {
 		case code := <-sender.Done():
+			logger.Info("sender.Done:" + SenderCodeStr(code))
 			switch code {
 			case NeedForceSync:
 				fullSyncTaskify(ctx)
@@ -103,21 +106,26 @@ func startAndBlock(ctx context.Context) error {
 				sender.Start()
 			}
 		case ack := <-changestream.NeedForceSync():
+			logger.Info("changestream.NeedForceSync")
 			sender.Stop()
 			fullSyncTaskify(ctx)
 			ack <- struct{}{}
 			sender.Start()
 		case <-changestream.OnStreamChanged():
+			logger.Info("changestream.OnStreamChanged")
 			again = sender.Start()
 		case delta := <-updateSyncTaskChan:
+			logger.Info("updateSyncTaskChan")
 			sender.Stop()
 			updateSyncTask(ctx, delta)
 			sender.Start()
 		case <-watchCollectionUpdated:
+			logger.Info("watchCollectionUpdated")
 			sender.Stop()
 			deltaSyncTaskify(ctx)
 			sender.Start()
 		case <-forceFullSync:
+			logger.Info("forceFullSync")
 			sender.Stop()
 			fullSyncTaskify(ctx)
 			sender.Start()
