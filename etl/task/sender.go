@@ -255,7 +255,7 @@ func (s *Sender) sync() error {
 
 	logger.Info("SyncTask end")
 
-	return nil
+	return iter.Err()
 }
 
 // err context.Canceled, ErrSendFailed, ErrNotFoundSentPoint or unknown
