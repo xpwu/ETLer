@@ -18,7 +18,6 @@ type getWcReq struct {
 
 func (s *suite) APIGetWatchCols(ctx context.Context, request *getWcReq) *getWcRes {
 	ctx, logger := log.WithCtx(ctx)
-	logger.PushPrefix("api GetWatchCols")
 
 	version := db.WatchCollection().LatestVersion(ctx)
 	wc := db.WatchCollection().Get(ctx, version)

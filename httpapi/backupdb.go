@@ -17,7 +17,6 @@ type backupRes struct {
 
 func (s *suite) APIBackupDB(ctx context.Context, request *backupReq) *backupRes {
 	ctx, logger := log.WithCtx(ctx)
-	logger.PushPrefix("api backup db")
 
 	p, err := db.GetBackupWorker().Backup(ctx)
 	if err != nil {

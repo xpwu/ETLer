@@ -21,7 +21,6 @@ type setWcRes struct {
 
 func (s *suite) APISetWatchCols(ctx context.Context, request *setWcReq) *setWcRes {
 	ctx, logger := log.WithCtx(ctx)
-	logger.PushPrefix("api SetWatchCols")
 
 	old, now := db.WatchCollection().Save(ctx, request.WatchInfos, request.Version)
 	logger.Info(fmt.Sprintf("expect version: %d, result: old=%d, now=%d", request.Version, old, now))
