@@ -10,7 +10,7 @@ type fullSyncReq struct {
 }
 
 // APIForceFullSync 强制全量同步所有监听的 collections
-func (s *suite) APIForceFullSync(ctx context.Context, request *clearReq) *api.EmptyResponse {
+func (s *suite) APIForceFullSync(ctx context.Context, request *fullSyncReq) *api.EmptyResponse {
 	task.PostForceFullSync()
 
 	return &api.EmptyResponse{}

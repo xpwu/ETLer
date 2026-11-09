@@ -39,7 +39,7 @@ func IsInWatchCollection(ctx context.Context, checking []x.WatchInfo) bool {
 
 	for _, wi := range checking {
 		if !m[wi.Id()] {
-			logger.Error(wi.DB + "." + wi.Collection + "is NOT in the Watch Collections")
+			logger.Error(wi.DB + "." + wi.Collection + " is NOT in the Watch Collections")
 			return false
 		}
 	}
