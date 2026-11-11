@@ -17,3 +17,4 @@
 leveldb/stream_test_db
 out
 /output
+/e2etest/run
