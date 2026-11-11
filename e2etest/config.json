@@ -1,0 +1,25 @@
+{
+  "github.com/xpwu/go-tinyserver/http:serverConfig": {
+    "Net": {
+      "Listen": "127.0.0.1:8080",
+      "MaxConnections": -1,
+      "TLS": false,
+      "TlsFile": { "PrivateKeyPEMFile": "", "CertPEMFile": "" }
+    },
+    "HostName": [],
+    "RootUri": "/api"
+  },
+  "github.com/xpwu/ETLer/etl/config:watch": {
+    "Deployment": {
+      "uri": "mongodb://127.0.0.1:27017/?replicaSet=rs0",
+      "user": "root",
+      "passwd": "e2epass123",
+      "maxconn": 2
+    },
+    "Collections": [
+      { "DB": "demo", "Collection": "items" }
+    ],
+    "SendToUrls": [ "http://127.0.0.1:9000/etl" ]
+  },
+  "github.com/xpwu/go-log/log:config": { "level": 1 }
+}
