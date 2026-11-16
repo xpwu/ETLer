@@ -159,10 +159,11 @@ func (s *Sender) Start() (isBusy bool) {
 // Stop 并发安全
 func (s *Sender) Stop() {
 	_, logger := log.WithCtx(s.ctx)
+	cancelF := func() {}
 	s.mutex.Lock()
 	if s.cancelF != nil {
 		logger.Info("will stop")
-		s.cancelF()
+		cancelF = s.cancelF
 		s.cancelF = nil
 	}
 
@@ -170,6 +171,7 @@ func (s *Sender) Stop() {
 	s.mutex.Unlock()
 
 	// 必须先解锁，再等待，防止死锁
+	cancelF()
 	<-stoppedSig
 }
 
