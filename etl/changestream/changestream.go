@@ -15,7 +15,7 @@ import (
 )
 
 func StartWatching() {
-	x.AutoRestartPanic(startAndBlock, x.WithName("watchChangeStream"))
+	x.AutoRestartPanic(startAndBlock, x.WithName("WatchingChangeStreamServer"))
 }
 
 type SyncAckChan = chan<- struct{}
@@ -55,7 +55,6 @@ func startAndBlock(ctx context.Context) error {
 	}
 
 	ctx, logger := log.WithCtx(ctx)
-	logger.PushPrefix("ChangeStreamServer")
 	logger.Info("start")
 	ctx, cancel := context.WithCancel(ctx)
 

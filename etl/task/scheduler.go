@@ -48,7 +48,7 @@ func WatchCollectionUpdated() {
 }
 
 func Start() {
-	x.AutoRestartPanic(startAndBlock, x.WithName("scheduler"))
+	x.AutoRestartPanic(startAndBlock, x.WithName("SchedulerServer"))
 }
 
 func startAndBlock(ctx context.Context) error {
@@ -62,7 +62,6 @@ func startAndBlock(ctx context.Context) error {
 	}
 
 	ctx, logger := log.WithCtx(ctx)
-	logger.PushPrefix("scheduler")
 
 	var mongoClient *mongo.Client
 
