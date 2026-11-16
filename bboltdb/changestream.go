@@ -59,9 +59,15 @@ func csDecodeEntry(data []byte) *csEntry {
 	if 4+uint32(tokenLen) > uint32(len(data)) {
 		return nil
 	}
+	// data 来自 bbolt 的 mmap，事务关闭后即失效，必须复制。
+	// ResumeToken() 也会把 resumeToken 传出 View 之外，依赖这里的拷贝。
+	token := make([]byte, int(tokenLen))
+	copy(token, data[4:4+int(tokenLen)])
+	value := make([]byte, len(data)-4-int(tokenLen))
+	copy(value, data[4+int(tokenLen):])
 	return &csEntry{
-		resumeToken: db.ResumeToken(data[4 : 4+tokenLen]),
-		value:       db.StreamValue(data[4+tokenLen:]),
+		resumeToken: db.ResumeToken(token),
+		value:       db.StreamValue(value),
 	}
 }
 
@@ -298,9 +304,11 @@ func (c *ChangeStream) Compact() {
 
 // ============ ChangeStreamIter ============
 
+// ChangeStreamIter 迭代器对外不持有事务：每次 Next 用一个短只读事务，读完即关。
+// 调用方在 Next() 返回 true 后会立刻执行 MarkSentUpTo / Save 等写事务，
+// 长读事务会与 bbolt 的 mmap 扩容互等（且 db.Update 不响应 ctx）。
 type ChangeStreamIter struct {
 	cs *ChangeStream
-	tx *bbolt.Tx
 
 	values    []db.StreamValue
 	lastId    db.StreamId
@@ -312,10 +320,9 @@ type ChangeStreamIter struct {
 }
 
 func (it *ChangeStreamIter) Next(ctx context.Context, limit int) bool {
-	if it.released || it.exhausted {
+	if it.released || it.exhausted || it.err != nil {
 		return false
 	}
-
 	select {
 	case <-ctx.Done():
 		it.err = ctx.Err()
@@ -323,100 +330,94 @@ func (it *ChangeStreamIter) Next(ctx context.Context, limit int) bool {
 	default:
 	}
 
-	// 每次 Next 开新读事务，保证看到最新数据
-	if it.tx != nil {
-		it.tx.Rollback()
-	}
-	tx, err := it.cs.db.Begin(false)
-	if err != nil {
-		it.err = err
+	it.values = nil
+
+	var values []db.StreamValue
+	var lastId db.StreamId
+
+	viewErr := it.cs.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(csBucketName))
+		if b == nil {
+			return nil
+		}
+
+		// 库里一条数据都没有：没有 lastsent 也就谈不上"找不到已发送点"，
+		// 这是正常空状态，不是错误。
+		firstKey, _ := b.Cursor().First()
+		if firstKey == nil {
+			return nil
+		}
+
+		if !it.started {
+			it.started = true
+			raw := b.Get([]byte(csKeyLastSent))
+			if raw == nil {
+				it.err = db.ErrNotFoundSentPoint
+				return nil
+			}
+			it.lastSent = csBytesToUint64(raw)
+			if b.Get(csKeyStream(it.lastSent)) == nil {
+				it.err = db.ErrNotFoundSentPoint
+				return nil
+			}
+		}
+
+		seekId := it.lastSent + 1
+		if len(it.lastId) > 0 {
+			seekId = csBytesToUint64(it.lastId) + 1
+		}
+
+		cursor := b.Cursor()
+		count := 0
+		for k, v := cursor.Seek(csKeyStream(seekId)); k != nil; k, v = cursor.Next() {
+			select {
+			case <-ctx.Done():
+				it.err = ctx.Err()
+				return nil
+			default:
+			}
+
+			id, ok := csParseStreamKey(k)
+			if !ok {
+				break
+			}
+
+			entry := csDecodeEntry(v)
+			if entry == nil || len(entry.value) == 0 {
+				continue
+			}
+
+			values = append(values, append(db.StreamValue(nil), entry.value...))
+			lastId = csUint64ToBytes(id)
+			count++
+
+			if limit > 0 && count >= limit {
+				break
+			}
+		}
+		return nil
+	})
+
+	if viewErr != nil {
+		it.err = viewErr
 		return false
 	}
-	it.tx = tx
-
-	b := tx.Bucket([]byte(csBucketName))
-	if b == nil {
-		it.Release(ctx)
+	if it.err != nil {
 		return false
 	}
 
-	// 库中还没有任何数据：此时不会有 lastsent，也就无从谈起"找不到已发送点"，
-	// 这不是错误，只是还没有数据可发送，所以返回 false 且 Err() == nil。
-	// 首次启动时就是这种状态，在现在版本的调用方来看，等 initWatching 保存第一条数据后即可正常迭代。
-	firstKey, _ := b.Cursor().First()
-	if firstKey == nil {
-		it.Release(ctx)
-		return false
-	}
-
-	// 首次：读 lastsent
-	if !it.started {
-		it.started = true
-		raw := b.Get([]byte(csKeyLastSent))
-		if raw == nil {
-			it.err = db.ErrNotFoundSentPoint
-			return false
-		}
-		it.lastSent = csBytesToUint64(raw)
-
-		// 判断 lastSent 对应的 stream 数据是否还在
-		if b.Get(csKeyStream(it.lastSent)) == nil {
-			it.err = db.ErrNotFoundSentPoint
-			return false
-		}
-	}
-
-	// seek 起点
-	var seekId uint64
-	if len(it.values) > 0 {
-		seekId = csBytesToUint64(it.lastId) + 1
-	} else {
-		seekId = it.lastSent + 1
-	}
-
-	it.values = it.values[:0]
-
-	cursor := b.Cursor()
-	count := 0
-	for k, v := cursor.Seek(csKeyStream(seekId)); k != nil; k, v = cursor.Next() {
-		select {
-		case <-ctx.Done():
-			it.err = ctx.Err()
-			return false
-		default:
-		}
-
-		id, ok := csParseStreamKey(k)
-		if !ok {
-			break // 不是 stream: 前缀，到末尾了
-		}
-
-		entry := csDecodeEntry(v)
-		if entry == nil || len(entry.value) == 0 {
-			continue
-		}
-
-		it.values = append(it.values, entry.value)
-		it.lastId = csUint64ToBytes(id)
-		count++
-
-		if limit > 0 && count >= limit {
-			break
-		}
-	}
-
-	if len(it.values) == 0 {
+	if len(values) == 0 {
 		it.exhausted = true
-		// 耗完就该释放
 		it.Release(ctx)
 		return false
 	}
+
+	it.values = values
+	it.lastId = lastId
 	return true
 }
 
-func (it *ChangeStreamIter) Values() []db.StreamValue {
-	return it.values
-}
+func (it *ChangeStreamIter) Values() []db.StreamValue { return it.values }
 
 func (it *ChangeStreamIter) LastStreamId() db.StreamId {
 	if len(it.values) == 0 {
@@ -425,19 +426,13 @@ func (it *ChangeStreamIter) LastStreamId() db.StreamId {
 	return it.lastId
 }
 
-func (it *ChangeStreamIter) Err() error {
-	return it.err
-}
+func (it *ChangeStreamIter) Err() error { return it.err }
 
 func (it *ChangeStreamIter) Release(ctx context.Context) {
 	if it.released {
 		return
 	}
 	it.released = true
-	if it.tx != nil {
-		it.tx.Rollback()
-		it.tx = nil
-	}
 	it.values = nil
 }
 

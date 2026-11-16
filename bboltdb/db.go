@@ -73,7 +73,8 @@ func New(ctx context.Context, dir string) (*DB, error) {
 	dbPath = filepath.Join(dbPath, dbName)
 
 	underlying, err := bbolt.Open(dbPath, 0644, &bbolt.Options{
-		Timeout: 1 * time.Second,
+		Timeout:         1 * time.Second,
+		InitialMmapSize: 64 << 20,
 	})
 	if err != nil {
 		logger.Error(err)

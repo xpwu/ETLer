@@ -99,7 +99,9 @@ func decodeTask(data []byte) (db.Task, error) {
 		if offset+int(valLen) > len(data) {
 			return db.Task{}, fmt.Errorf("decodeTask: value overflow")
 		}
-		rawValue = data[offset : offset+int(valLen)]
+		// data 来自 bbolt 的 mmap，事务关闭后即失效，必须复制
+		rawValue = make([]byte, int(valLen))
+		copy(rawValue, data[offset:offset+int(valLen)])
 	}
 
 	return db.Task{
@@ -116,67 +118,48 @@ func decodeTask(data []byte) (db.Task, error) {
 
 // ---- SyncTaskIterator ----
 
+// 迭代器遍历 All() 时刻的内存快照，对外不持有任何 bbolt 事务。
+// SyncTaskDBer 契约允许调用方在 Next() 遍历期间执行 InsertOrUpdate / Del；
+// 若迭代器持有长读事务，写事务提交触发 mmap 扩容时会与读事务互等形成死锁。
+//
+// 快照语义与原实现一致：bbolt 读事务本身就是 MVCC 快照，迭代期间的写入
+// 本来就不会（也不应该）反映到当前迭代——那些写是给重启续传用的。
 type syncTaskIter struct {
-	tx       *bbolt.Tx
-	cursor   *bbolt.Cursor
-	current  db.Task
+	tasks    []db.Task
+	i        int
 	err      error
 	released bool
-	started  bool
 }
 
 func (it *syncTaskIter) Next(ctx context.Context) bool {
 	if it.released {
 		return false
 	}
-
 	select {
 	case <-ctx.Done():
 		it.err = ctx.Err()
 		return false
 	default:
 	}
-
-	// bbolt 的 cursor 必须先定位(First/Seek/Last)后才能 Next，
-	// 新 cursor 直接 Next 会返回 nil，所以首次调用用 First()
-	var k, v []byte
-	if !it.started {
-		it.started = true
-		k, v = it.cursor.First()
-	} else {
-		k, v = it.cursor.Next()
-	}
-	if k == nil {
+	if it.i >= len(it.tasks) {
 		return false
 	}
-
-	task, err := decodeTask(v)
-	if err != nil {
-		it.err = err
-		return false
-	}
-
-	it.current = task
+	it.i++
 	return true
 }
 
 func (it *syncTaskIter) Current() db.Task {
-	return it.current
+	if it.i == 0 || it.i > len(it.tasks) {
+		return db.Task{}
+	}
+	return it.tasks[it.i-1]
 }
 
-func (it *syncTaskIter) Err() error {
-	return it.err
-}
+func (it *syncTaskIter) Err() error { return it.err }
 
 func (it *syncTaskIter) Release(ctx context.Context) {
-	if it.released {
-		return
-	}
 	it.released = true
-	if it.tx != nil {
-		_ = it.tx.Rollback()
-		it.tx = nil
-	}
+	it.tasks = nil
 }
 
 // ---- SyncTask ----
@@ -202,23 +185,27 @@ func NewSyncTask(ctx context.Context, db *DB) (st *SyncTask, err error) {
 }
 
 func (s *SyncTask) All(ctx context.Context) db.SyncTaskIterator {
-	tx, err := s.db.Begin(false) // readonly
+	tasks := make([]db.Task, 0, 4)
+
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(stBucketName))
+		if b == nil {
+			return fmt.Errorf("bucket %s not found", stBucketName)
+		}
+		return b.ForEach(func(_, v []byte) error {
+			task, err := decodeTask(v)
+			if err != nil {
+				return err
+			}
+			tasks = append(tasks, task)
+			return nil
+		})
+	})
 	if err != nil {
 		return &syncTaskIter{err: err, released: true}
 	}
 
-	b := tx.Bucket([]byte(stBucketName))
-	if b == nil {
-		_ = tx.Rollback()
-		return &syncTaskIter{err: fmt.Errorf("bucket %s not found", stBucketName), released: true}
-	}
-
-	iter := &syncTaskIter{
-		tx:     tx,
-		cursor: b.Cursor(),
-	}
-
-	return iter
+	return &syncTaskIter{tasks: tasks}
 }
 
 func (s *SyncTask) InsertOrUpdate(ctx context.Context, task db.Task) {
