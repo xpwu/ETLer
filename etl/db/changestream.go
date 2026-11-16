@@ -15,6 +15,8 @@ var (
 	ErrNotFoundSentPoint = errors.New("not found change stream sent point in DB")
 )
 
+// ChangeStreamIterator 迭代器返回的数据必须是独立副本，不得引用 DB 内部存储；
+// 迭代期间调用方可安全执行本接口的任意写方法，实现方不得持有长事务或锁。
 type ChangeStreamIterator interface {
 
 	// Next 第一次也必须调用 Next, Values() 才会有值。迭代完数据库中已有的值或者有错，返回 false
