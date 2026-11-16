@@ -2,8 +2,12 @@ package bboltdb
 
 import (
 	"context"
+	"fmt"
+	"go.etcd.io/bbolt"
+	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/xpwu/ETLer/etl/db"
 	"github.com/xpwu/ETLer/x"
@@ -162,5 +166,53 @@ func TestSyncTaskClear(t *testing.T) {
 	st.InsertOrUpdate(ctx, task("db", "c3", nil))
 	if got := allTasks(t, st, ctx); len(got) != 1 {
 		t.Fatalf("len = %d, want 1", len(got))
+	}
+}
+
+func TestSyncTaskIterAllowsWriteDuringIteration(t *testing.T) {
+	dir := t.TempDir()
+	underlying, err := bbolt.Open(filepath.Join(dir, "small.db"), 0600,
+		&bbolt.Options{NoSync: true, NoFreelistSync: true}) // 故意不设 InitialMmapSize
+	if err != nil {
+		t.Fatalf("open bbolt failed: %v", err)
+	}
+	t.Cleanup(func() {
+		done := make(chan struct{})
+		go func() { _ = underlying.Close(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			// 死锁场景放弃 Close，进程退出时由 OS 回收文件与映射
+		}
+	})
+
+	st, err := NewSyncTask(context.Background(), &DB{Dir: dir, Underlying: underlying})
+	if err != nil {
+		t.Fatalf("NewSyncTask failed: %v", err)
+	}
+
+	ctx := context.Background()
+	st.InsertOrUpdate(ctx, task("db1", "c1", nil))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		it := st.All(ctx)
+		defer it.Release(ctx)
+		for it.Next(ctx) {
+			tk := it.Current()
+			tk.UntilDocId.Value = []byte("progress")
+			st.InsertOrUpdate(ctx, tk) // 协议允许：更新进度
+			st.Del(ctx, tk.Id())       // 协议允许：删除已完成
+			for i := 0; i < 500; i++ { // 制造新页，逼迫 grow mmap
+				st.InsertOrUpdate(ctx, task("db1", fmt.Sprintf("c%d", i), []byte("x")))
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("迭代期间写操作死锁（读事务与 mmap 扩容互等）")
 	}
 }
