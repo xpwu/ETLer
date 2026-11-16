@@ -14,6 +14,8 @@
 #
 # 本地只需要：Docker（daemon 已启动）、Go >= 1.25、Python3。
 # macOS 已适配：自动补 docker CLI 的 PATH、等待 daemon、不用 seq。
+
+# 中文文案里的变量一律写 ${VAR}
 # =============================================================================
 
 set -uo pipefail
@@ -52,6 +54,13 @@ ok()   { printf '%b\n' "${GRN}[e2e]${NC} $*"; }
 # ---------- 诊断：失败时把所有线索一次打全 ----------
 die() {
   printf '%b\n' "${RED}[e2e] FAILED:${NC} $*" >&2
+
+  # ---------- 抓 Go goroutine 栈（诊断用；Go 收到 SIGQUIT 会 dump 后退出） ----------
+    if [ -n "${ETLER_PID:-}" ] && kill -0 "$ETLER_PID" 2>/dev/null; then
+      printf '%s\n' "[e2e] 发送 SIGQUIT 给 etler ($ETLER_PID)，抓取 goroutine 栈..." >&2
+      kill -QUIT "$ETLER_PID" 2>/dev/null || true
+      sleep 3
+    fi
 
   printf '%s\n' "---------- sink.jsonl 全部内容 ----------" >&2
   if [ -s "$SINKLOG" ]; then
@@ -146,7 +155,7 @@ if [ "$GOMAJ" -lt 1 ] || { [ "$GOMAJ" -eq 1 ] && [ "$GOMIN" -lt 25 ]; }; then
 fi
 info "Go: $(go version)"
 
-FIXED_FILES=("config.json" "sink.py" "check.py" "initdb.d/01-keyfile.sh")
+FIXED_FILES=("config.json" "sink.py" "check.py" "check_vars.py" "initdb.d/01-keyfile.sh")
 MISSING=0
 for f in "${FIXED_FILES[@]}"; do
   if [ ! -f "$WORK/$f" ]; then
@@ -208,6 +217,9 @@ stop_previous_run() {
 }
 
 stop_previous_run
+
+python3 "$WORK/check_vars.py" "$WORK/e2etest.sh" \
+  || { printf '%s\n' "e2etest.sh 存在裸 \$VAR 紧贴中文字符，请先改成 \${VAR} 再运行" >&2; exit 1; }
 
 # 给 Docker Desktop 一点时间释放 27017；若仍占用，把占用者列出来
 PORT_OK=0
@@ -291,7 +303,7 @@ ok "编译完成: $RUN/etler"
 SINK_PID=$!
 printf '%s\n' "$SINK_PID" > "$RUN/sink.pid"
 
-(cd "$RUN" && exec ./etler > "$RUN/etler.log" 2>&1) &
+(cd "$RUN" && export GOTRACEBACK=all && exec ./etler > "$RUN/etler.log" 2>&1) &
 ETLER_PID=$!
 printf '%s\n' "$ETLER_PID" > "$RUN/etler.pid"
 
@@ -366,9 +378,9 @@ info "已触发 insert(d) / update(b) / delete(c) / 非监听集合 other.insert
 # 应到事件数 = 已到达的探针数(PROBE_N 中最多 1 条会真正到达，这里用实际计数) + 3
 PROBE_ARRIVED="$(python3 "$CHECK" --count-probes "$SINKLOG")"
 NEED=$((PROBE_ARRIVED + 3))
-info "等待增量事件（总 T=1 事件数 >= $NEED，其中探针 $PROBE_ARRIVED 条）"
-wait_until 60 "增量事件到齐 (>= $NEED)" \
-  python3 "$CHECK" --wait-events "$NEED" "$SINKLOG" || die "60s 内增量事件没到齐"
+info "等待增量事件（总 T=1 事件数 >= ${NEED}，其中探针 $PROBE_ARRIVED 条）"
+wait_until 60 "增量事件到齐 (>= ${NEED})" \
+  python3 "$CHECK" --wait-events "${NEED}" "$SINKLOG" || die "60s 内增量事件没到齐"
 
 python3 "$CHECK" "$SINKLOG" || die "主闭环判定未通过"
 
@@ -387,19 +399,22 @@ if [ "$FULL" -eq 1 ]; then
   ok "故障重试通过"
 
   info "=== --full：停服重启续传 ==="
-  kill "$ETLER_PID" 2>/dev/null || true
-  wait "$ETLER_PID" 2>/dev/null || true
-  mongo_eval 'db.getSiblingDB("demo").items.insertOne({_id:"f",v:6})' >/dev/null
-  sleep 1
-  (cd "$RUN" && exec ./etler >> "$RUN/etler.log" 2>&1) &
-  ETLER_PID=$!
-  printf '%s\n' "$ETLER_PID" > "$RUN/etler.pid"
+    SYNC_BEFORE="$(python3 "$CHECK" --count-sync "$SINKLOG")"
+    kill "$ETLER_PID" 2>/dev/null || true
+    wait "$ETLER_PID" 2>/dev/null || true
+    mongo_eval 'db.getSiblingDB("demo").items.insertOne({_id:"f",v:6})' >/dev/null
+    sleep 1
+    (cd "$RUN" && export GOTRACEBACK=all && exec ./etler >> "$RUN/etler.log" 2>&1) &
+    ETLER_PID=$!
+    printf '%s\n' "$ETLER_PID" > "$RUN/etler.pid"
 
-  wait_until 60 "重启后 f 事件送达" \
-    python3 "$CHECK" --wait-event-id f "$SINKLOG" || die "重启后 f 事件没有送达"
-  python3 "$CHECK" --assert-sync-once "$SINKLOG" \
-    || die "重启后重复做了全量同步"
-  ok "重启续传通过"
+    wait_until 60 "重启后 f 事件送达" \
+      python3 "$CHECK" --wait-event-id f "$SINKLOG" || die "重启后 f 事件没有送达"
+    SYNC_AFTER="$(python3 "$CHECK" --count-sync "$SINKLOG")"
+    if [ "${SYNC_BEFORE}" != "${SYNC_AFTER}" ]; then
+      die "重启后重新做了全量同步（Sync 次数 ${SYNC_BEFORE} -> ${SYNC_AFTER}）"
+    fi
+    ok "重启续传通过（f 送达，Sync 次数保持 ${SYNC_AFTER}）"
 fi
 
 # ---------- 8. 结果 ----------
