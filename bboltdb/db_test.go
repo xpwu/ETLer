@@ -37,7 +37,7 @@ func newTestDB(t *testing.T) *DB {
 
 type countCompact struct{ n *int }
 
-func (c countCompact) Compact() { *c.n++ }
+func (c countCompact) Compact(ctx context.Context) { *c.n++ }
 
 // New 使用 exe.AbsDir，所以这里用唯一目录名并在结束后清理
 func TestNewCreatesDBFile(t *testing.T) {

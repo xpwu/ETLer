@@ -147,7 +147,7 @@ func (c *ChangeStream) Save(ctx context.Context, resumeToken db.ResumeToken, val
 func (c *ChangeStream) MarkSentUpTo(ctx context.Context, id db.StreamId) {
 	streamId := csBytesToUint64(id)
 	wrote := false
-	_, logger := log.WithCtx(ctx)
+	ctx, logger := log.WithCtx(ctx)
 	logger.PushPrefix("MarkSentUpTo")
 
 	// 只能向后推进，不能回退
@@ -193,7 +193,7 @@ func (c *ChangeStream) MarkSentUpTo(ctx context.Context, id db.StreamId) {
 
 	// 触发清理检查
 	if wrote {
-		c.Compact()
+		c.Compact(ctx)
 	}
 }
 
@@ -245,7 +245,7 @@ func (c *ChangeStream) ResumeToken(ctx context.Context) (resumeToken db.ResumeTo
 // DeleteAll / Save 不会被并发调用，这两个方法相互之间也不会并发调用，
 // 但是 Save / DeleteAll 与其它方法相互之间会并发调用，其它方法本身也可能并发调用
 func (c *ChangeStream) DeleteAll(ctx context.Context) {
-	_, logger := log.WithCtx(ctx)
+	ctx, logger := log.WithCtx(ctx)
 	logger.PushPrefix("DeleteAll")
 
 	err := c.db.Update(func(tx *bbolt.Tx) error {
@@ -272,8 +272,11 @@ func (c *ChangeStream) DeleteAll(ctx context.Context) {
 }
 
 // Compact 清理已发送数据，保留最后一条 sent（保证 ResumeToken 始终有数据）
-func (c *ChangeStream) Compact() {
-	_ = c.db.Update(func(tx *bbolt.Tx) error {
+func (c *ChangeStream) Compact(ctx context.Context) {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("Compact")
+
+	err := c.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(csBucketName))
 		raw := b.Get([]byte(csKeyLastSent))
 		if raw == nil {
@@ -320,6 +323,10 @@ func (c *ChangeStream) Compact() {
 
 		return nil
 	})
+
+	if err != nil {
+		logger.Error(err)
+	}
 }
 
 // ============ ChangeStreamIter ============

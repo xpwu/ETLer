@@ -97,7 +97,7 @@ func TestCompactUsesDBMinStreamId(t *testing.T) {
 	cs, _ := stateOpenCS(t)
 	stateSeed(cs, 1002, 1000, 1001, 1002)
 
-	cs.Compact()
+	cs.Compact(context.Background())
 
 	got := stateStreamIds(t, cs)
 	if len(got) != 3 || got[0] != 1000 || got[1] != 1001 || got[2] != 1002 {
@@ -117,7 +117,7 @@ func TestCompactGuardWhenLastSentBehindMinStreamId(t *testing.T) {
 	cs, _ := stateOpenCS(t)
 	stateSeed(cs, 3, 5000)
 
-	cs.Compact()
+	cs.Compact(context.Background())
 
 	got := stateStreamIds(t, cs)
 	if len(got) != 1 || got[0] != 5000 {
@@ -143,7 +143,7 @@ func TestDeleteAllConcurrentWithCompact(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); cs.DeleteAll(ctx) }()
-		go func() { defer wg.Done(); cs.Compact() }()
+		go func() { defer wg.Done(); cs.Compact(context.Background()) }()
 		wg.Wait()
 
 		// 不变量：bucket 恒存在（New 建过；DeleteAll 删后在同一事务立即重建；
@@ -164,6 +164,15 @@ func TestDeleteAllConcurrentWithCompact(t *testing.T) {
 		}
 		_ = it.Err()
 		it.Release(ctx)
+	}
+
+	// 交错结束后 DeleteAll 的「提交后重置」仍应生效：下一次 Save 从 id=1 开始
+	if id, err := cs.Save(ctx,
+		db.ResumeToken([]byte("after")),
+		db.StreamValue([]byte("v"))); err != nil {
+		t.Fatalf("交错后 Save failed: %v", err)
+	} else if csBytesToUint64(id) != 1 {
+		t.Fatalf("交错后首个 id = %d, want 1（DeleteAll 的 currentSeq 重置丢失）", csBytesToUint64(id))
 	}
 }
 
@@ -192,5 +201,50 @@ func TestDeleteAllKeepsSeqWhenDBClosed(t *testing.T) {
 	if cs.currentSeq != before {
 		t.Fatalf("Update 失败后 currentSeq = %d, want %d（内存状态不应领先于未提交的事务）",
 			cs.currentSeq, before)
+	}
+}
+
+// 用例 5（护栏）：触发 Compact 时 lastsent 之后仍有未发送条目
+func TestCompactKeepsUnsentTail(t *testing.T) {
+	if testing.Short() {
+		t.Skip("慢用例：需写入 csCompactThreshold+5 条")
+	}
+	cs, _ := stateOpenCS(t)
+	ctx := context.Background()
+
+	const total = int(csCompactThreshold) + 5 // 1005
+	for i := 1; i <= total; i++ {
+		if _, err := cs.Save(ctx,
+			db.ResumeToken([]byte(fmt.Sprintf("t%d", i))),
+			db.StreamValue([]byte(fmt.Sprintf("v%d", i)))); err != nil {
+			t.Fatalf("Save(%d) failed: %v", i, err)
+		}
+	}
+
+	// lastsent=1002；后面 1003/1004/1005 是有效 value，MarkSentUpTo 不会跨过
+	cs.MarkSentUpTo(ctx, csUint64ToBytes(uint64(total-3)))
+
+	got := stateStreamIds(t, cs)
+	if len(got) != 4 || got[0] != 1002 || got[3] != 1005 {
+		t.Fatalf("Compact 后 ids = %v, want [1002 1003 1004 1005]", got)
+	}
+	if rt := cs.ResumeToken(ctx); string(rt) != fmt.Sprintf("t%d", total) {
+		t.Fatalf("ResumeToken = %q, want t%d", rt, total)
+	}
+	if id := csBytesToUint64(cs.LastStreamId()); id != uint64(total) {
+		t.Fatalf("LastStreamId = %d, want %d", id, total)
+	}
+
+	it := cs.AllNotSent(ctx)
+	defer it.Release(ctx)
+	if !it.Next(ctx, 10) {
+		t.Fatalf("未发送的 3 条应可读, err = %v", it.Err())
+	}
+	values := it.Values()
+	if len(values) != 3 || string(values[0]) != "v1003" || string(values[2]) != "v1005" {
+		t.Fatalf("Values() = %q, want [v1003 v1004 v1005]", values)
+	}
+	if err := it.Err(); err != nil {
+		t.Fatalf("Err = %v, want nil", err)
 	}
 }

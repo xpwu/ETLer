@@ -46,7 +46,7 @@ func Init() error {
 const dbName = "etlworkdb"
 
 type CompactAble interface {
-	Compact()
+	Compact(ctx context.Context)
 }
 
 type DB struct {
@@ -94,7 +94,7 @@ func (db *DB) Backup(ctx context.Context) (backupName string, err error) {
 	logger.PushPrefix("bbolt backup: " + suffixName)
 
 	for _, c := range db.CompactAbles {
-		c.Compact()
+		c.Compact(ctx)
 	}
 
 	// New 中已经创建过了，也可以再创建路径
