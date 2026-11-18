@@ -378,7 +378,7 @@ info "已触发 insert(d) / update(b) / delete(c) / 非监听集合 other.insert
 # 应到事件数 = 已到达的探针数(PROBE_N 中最多 1 条会真正到达，这里用实际计数) + 3
 PROBE_ARRIVED="$(python3 "$CHECK" --count-probes "$SINKLOG")"
 NEED=$((PROBE_ARRIVED + 3))
-info "等待增量事件（总 T=1 事件数 >= ${NEED}，其中探针 $PROBE_ARRIVED 条）"
+info "等待增量事件（总 T=1 事件数 >= ${NEED}，其中探针 ${PROBE_ARRIVED} 条）"
 wait_until 60 "增量事件到齐 (>= ${NEED})" \
   python3 "$CHECK" --wait-events "${NEED}" "$SINKLOG" || die "60s 内增量事件没到齐"
 
