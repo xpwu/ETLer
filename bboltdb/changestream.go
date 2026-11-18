@@ -74,9 +74,8 @@ func csDecodeEntry(data []byte) *csEntry {
 // ============ ChangeStream ============
 
 type ChangeStream struct {
-	db          *bbolt.DB
-	currentSeq  uint64 // 内存：当前最大 stream id
-	minStreamId uint64 // 内存：当前最小 stream id
+	db         *bbolt.DB
+	currentSeq uint64 // 内存：当前最大 stream id
 }
 
 func NewChangeStream(ctx context.Context, db *DB) (*ChangeStream, error) {
@@ -94,7 +93,7 @@ func NewChangeStream(ctx context.Context, db *DB) (*ChangeStream, error) {
 		return nil, err
 	}
 
-	// 扫描初始化 currentSeq / minStreamId
+	// 扫描初始化 currentSeq
 	err = cs.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(csBucketName))
 		if b == nil {
@@ -109,13 +108,7 @@ func NewChangeStream(ctx context.Context, db *DB) (*ChangeStream, error) {
 				break
 			}
 		}
-		// 找最小 id：从前往后
-		for k, _ := cursor.First(); k != nil; k, _ = cursor.Next() {
-			if id, ok := csParseStreamKey(k); ok {
-				cs.minStreamId = id
-				break
-			}
-		}
+
 		return nil
 	})
 	if err != nil {
@@ -154,9 +147,11 @@ func (c *ChangeStream) Save(ctx context.Context, resumeToken db.ResumeToken, val
 func (c *ChangeStream) MarkSentUpTo(ctx context.Context, id db.StreamId) {
 	streamId := csBytesToUint64(id)
 	wrote := false
+	_, logger := log.WithCtx(ctx)
+	logger.PushPrefix("MarkSentUpTo")
 
 	// 只能向后推进，不能回退
-	_ = c.db.Update(func(tx *bbolt.Tx) error {
+	err := c.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(csBucketName))
 		raw := b.Get([]byte(csKeyLastSent))
 		if raw != nil {
@@ -190,6 +185,11 @@ func (c *ChangeStream) MarkSentUpTo(ctx context.Context, id db.StreamId) {
 		wrote = true
 		return b.Put([]byte(csKeyLastSent), csUint64ToBytes(streamId))
 	})
+
+	if err != nil {
+		logger.Error(err)
+		return
+	}
 
 	// 触发清理检查
 	if wrote {
@@ -245,7 +245,10 @@ func (c *ChangeStream) ResumeToken(ctx context.Context) (resumeToken db.ResumeTo
 // DeleteAll / Save 不会被并发调用，这两个方法相互之间也不会并发调用，
 // 但是 Save / DeleteAll 与其它方法相互之间会并发调用，其它方法本身也可能并发调用
 func (c *ChangeStream) DeleteAll(ctx context.Context) {
-	_ = c.db.Update(func(tx *bbolt.Tx) error {
+	_, logger := log.WithCtx(ctx)
+	logger.PushPrefix("DeleteAll")
+
+	err := c.db.Update(func(tx *bbolt.Tx) error {
 		// 直接删 bucket
 		if err := tx.DeleteBucket([]byte(csBucketName)); err != nil {
 			if err == bboltErrors.ErrBucketNotFound {
@@ -256,12 +259,16 @@ func (c *ChangeStream) DeleteAll(ctx context.Context) {
 		// 重建
 		_, err := tx.CreateBucket([]byte(csBucketName))
 
-		// 重置内存状态
-		c.currentSeq = 0
-		c.minStreamId = 0
-
 		return err
 	})
+
+	if err != nil {
+		logger.Error(err)
+		return
+	}
+
+	// 只有事务真正提交成功才重置内存状态
+	c.currentSeq = 0
 }
 
 // Compact 清理已发送数据，保留最后一条 sent（保证 ResumeToken 始终有数据）
@@ -274,8 +281,22 @@ func (c *ChangeStream) Compact() {
 		}
 		lastSentId := csBytesToUint64(raw)
 
-		sentCount := lastSentId - c.minStreamId
-		if sentCount < csCompactThreshold {
+		// 从前向后，找当前最小 stream id
+		var minStreamId uint64
+		cur := b.Cursor()
+		for k, _ := cur.First(); k != nil; k, _ = cur.Next() {
+			if id, ok := csParseStreamKey(k); ok {
+				minStreamId = id
+				break
+			}
+		}
+
+		// 堵住下溢
+		if minStreamId == 0 || lastSentId <= minStreamId {
+			return nil
+		}
+
+		if lastSentId-minStreamId < csCompactThreshold {
 			return nil
 		}
 
@@ -294,10 +315,9 @@ func (c *ChangeStream) Compact() {
 		}
 
 		for _, k := range toDelete {
-			b.Delete(k)
+			_ = b.Delete(k)
 		}
 
-		c.minStreamId = lastSentId
 		return nil
 	})
 }
