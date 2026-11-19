@@ -56,17 +56,6 @@ func startAndBlock(ctx context.Context) error {
 
 	ctx, logger := log.WithCtx(ctx)
 	logger.Info("start")
-	ctx, cancel := context.WithCancel(ctx)
-
-	go func() {
-		select {
-		case <-watchCollectionUpdated:
-			// stop watching stream, and wait for restarting
-			logger.Debug("WatchCollection is updated, canceling")
-			cancel()
-			logger.Debug("WatchCollection is updated, wait for restarting")
-		}
-	}()
 
 	var mongoClient *mongo.Client
 
@@ -82,6 +71,19 @@ func startAndBlock(ctx context.Context) error {
 	}
 
 	for {
+		ctx, cancel := context.WithCancel(ctx)
+
+		go func() {
+			select {
+			case <-watchCollectionUpdated:
+				// stop watching stream, and wait for restarting
+				logger.Debug("WatchCollection is updated, canceling")
+				cancel()
+				logger.Debug("WatchCollection is updated, wait for restarting")
+			case <-ctx.Done():
+			}
+		}()
+
 		var streamErr *StreamError
 
 		logger.Info("get ResumeToken from local db")
@@ -107,6 +109,8 @@ func startAndBlock(ctx context.Context) error {
 		default: // ErrShuttingDown, ErrRetryNow - retry now
 			time.Sleep(1 * time.Second)
 		}
+
+		cancel()
 		logger.Info("stream err, retry server")
 	}
 }
@@ -163,9 +167,17 @@ func initWatching(ctx context.Context, client *mongo.Client) (resumeToken bson.R
 	}
 
 	syncAck := make(chan struct{}, 1)
-	syncChan <- syncAck
-	<-syncAck
-	close(syncAck)
+	select {
+	case syncChan <- syncAck:
+	case <-ctx.Done():
+		return nil, AsStreamError(ctx.Err(), false)
+	}
+	select {
+	case <-syncAck:
+	case <-ctx.Done():
+		return nil, AsStreamError(ctx.Err(), false)
+	}
+
 	// 必须等待 sync ack 才能保存 resumeToken, 否则可能出现 sync 丢失的情况
 	id, err := db.ChangeStream().Save(ctx, resumeToken, nil)
 	if err != nil {
