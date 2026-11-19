@@ -30,13 +30,13 @@ def _cstr(raw, pos):
 def _skip(raw, pos, t):
     if t == 0x01: return pos + 8
     if t in (0x02, 0x0D, 0x0E):
-        (n,) = struct.unpack_from("<i", raw, pos);
+        (n,) = struct.unpack_from("<i", raw, pos)
         return pos + 4 + n
     if t in (0x03, 0x04, 0x0F):
-        (n,) = struct.unpack_from("<i", raw, pos);
+        (n,) = struct.unpack_from("<i", raw, pos)
         return pos + n
     if t == 0x05:
-        (n,) = struct.unpack_from("<i", raw, pos);
+        (n,) = struct.unpack_from("<i", raw, pos)
         return pos + 4 + 1 + n
     if t == 0x06: return pos
     if t == 0x07: return pos + 12
@@ -44,11 +44,11 @@ def _skip(raw, pos, t):
     if t in (0x09, 0x11, 0x12): return pos + 8
     if t == 0x0A: return pos
     if t == 0x0B:
-        _, p = _cstr(raw, pos);
-        _, p = _cstr(raw, p);
+        _, p = _cstr(raw, pos)
+        _, p = _cstr(raw, p)
         return p
     if t == 0x0C:
-        (n,) = struct.unpack_from("<i", raw, pos);
+        (n,) = struct.unpack_from("<i", raw, pos)
         return pos + 4 + n + 12
     if t == 0x10: return pos + 4
     if t == 0x13: return pos + 16
@@ -82,11 +82,11 @@ def _parse(raw, want=None):
         raise ValueError(f"bad bson size {size} != {len(raw)}")
     pos, out = 4, {}
     while pos < size - 1:
-        t = raw[pos];
+        t = raw[pos]
         pos += 1
         key, pos = _cstr(raw, pos)
         if want is not None and key not in want:
-            pos = _skip(raw, pos, t);
+            pos = _skip(raw, pos, t)
             continue
         val, pos = _read(raw, pos, t)
         out[key] = val
@@ -203,6 +203,74 @@ def cmd_check_fail_seen(path):
     return 0 if any(r.get("status") == 500 for r in load(path)) else 1
 
 
+def cmd_wait_sync_ns(db, coll, path):
+    want = {"DB": db, "Coll": coll}
+    for r in successful(load(path)):
+        b = r.get("body") or {}
+        if b.get("T") == 0 and b.get("Ns") == want:
+            return 0
+    return 1
+
+
+def sync_count(path):
+    return sum(1 for r in successful(load(path))
+               if (r.get("body") or {}).get("T") == 0)
+
+
+def cmd_count_sync_ge(n, path):
+    return 0 if sync_count(path) >= n else 1
+
+
+def docs_count(t, path):
+    return sum(len((r.get("body") or {}).get("Data") or [])
+               for r in successful(load(path))
+               if (r.get("body") or {}).get("T") == t)
+
+
+def cmd_count_docs(t, path):
+    print(docs_count(t, path))
+    return 0
+
+
+def cmd_count_docs_ge(t, n, path):
+    return 0 if docs_count(t, path) >= n else 1
+
+
+def events_count(path):
+    return docs_count(1, path)
+
+
+def cmd_count_events(path):
+    print(events_count(path))
+    return 0
+
+
+# fullDocument 只在 update 事件里有意义；单独用一份 want 集合解析，
+# 不改全局 WANT，避免影响 verify() 里既有的 decode() 行为。
+def decode_full(item):
+    return _parse(base64.b64decode(item),
+                  want={"operationType", "documentKey", "fullDocument"})
+
+
+def cmd_check_full_document(eid, field, value, path):
+    for r in successful(load(path)):
+        b = r.get("body") or {}
+        if b.get("T") != 1:
+            continue
+        for x in (b.get("Data") or []):
+            try:
+                e = decode_full(x)
+            except Exception:
+                continue
+            dk = e.get("documentKey") or {}
+            if dk.get("_id") != eid or e.get("operationType") != "update":
+                continue
+            fd = e.get("fullDocument") or {}
+            if str(fd.get(field)) == value:
+                return 0
+    return 1
+
+
 # ---------------------------------------------------------------- 主判定
 
 def fail(msg):
@@ -315,6 +383,18 @@ def main():
         return cmd_count_sync(argv[1])
     if cmd == "--check-fail-seen":
         return cmd_check_fail_seen(argv[1])
+    if cmd == "--wait-sync-ns":
+        return cmd_wait_sync_ns(argv[1], argv[2], argv[3])
+    if cmd == "--count-sync-ge":
+        return cmd_count_sync_ge(int(argv[1]), argv[2])
+    if cmd == "--count-docs":
+        return cmd_count_docs(int(argv[1]), argv[2])
+    if cmd == "--count-docs-ge":
+        return cmd_count_docs_ge(int(argv[1]), int(argv[2]), argv[3])
+    if cmd == "--count-events":
+        return cmd_count_events(argv[1])
+    if cmd == "--check-full-document":
+        return cmd_check_full_document(argv[1], argv[2], argv[3], argv[4])
     if cmd.startswith("--"):
         print(f"未知子命令: {cmd}")
         print(__doc__)

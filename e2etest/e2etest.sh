@@ -23,6 +23,12 @@ set -uo pipefail
 FULL=0
 [ "${1:-}" = "--full" ] && FULL=1
 
+SCENARIOS=0
+for _arg in "$@"; do
+  [ "$_arg" = "--full" ] && FULL=1
+  [ "$_arg" = "--scenarios" ] && SCENARIOS=1
+done
+
 MONGO_CT="etl-mongo-e2e"
 MUSER="root"
 MPASS="e2epass123"
@@ -51,55 +57,23 @@ RED='\033[31m'; GRN='\033[32m'; YLW='\033[33m'; NC='\033[0m'
 info() { printf '%b\n' "${YLW}[e2e]${NC} $*"; }
 ok()   { printf '%b\n' "${GRN}[e2e]${NC} $*"; }
 
-# ---------- 诊断：失败时把所有线索一次打全 ----------
+# ---------- 诊断：失败时只报位置，不展开任何日志内容 ----------
 die() {
   printf '%b\n' "${RED}[e2e] FAILED:${NC} $*" >&2
 
-  # ---------- 抓 Go goroutine 栈（诊断用；Go 收到 SIGQUIT 会 dump 后退出） ----------
-    if [ -n "${ETLER_PID:-}" ] && kill -0 "$ETLER_PID" 2>/dev/null; then
-      printf '%s\n' "[e2e] 发送 SIGQUIT 给 etler ($ETLER_PID)，抓取 goroutine 栈..." >&2
-      kill -QUIT "$ETLER_PID" 2>/dev/null || true
-      sleep 3
-    fi
-
-  printf '%s\n' "---------- sink.jsonl 全部内容 ----------" >&2
-  if [ -s "$SINKLOG" ]; then
-    cat "$SINKLOG" >&2
-  else
-    printf '%s\n' "(空文件)" >&2
+  # SIGQUIT 只把 goroutine 栈追加进 etler.log，不在命令行展开
+  if [ -n "${ETLER_PID:-}" ] && kill -0 "$ETLER_PID" 2>/dev/null; then
+    kill -QUIT "$ETLER_PID" 2>/dev/null || true
+    sleep 2
+    printf '%s\n' "[e2e] 已抓取 goroutine 栈（见 ${RUN}/etler.log）" >&2
   fi
 
-  printf '%s\n' "---------- etler.log ----------" >&2
-  if [ -s "$RUN/etler.log" ]; then
-    cat "$RUN/etler.log" >&2
-  else
-    printf '%s\n' "(空文件：go-log 可能写到了别处，见下面 run/ 目录树)" >&2
-  fi
-
-  printf '%s\n' "---------- sink.log / mongosh.err ----------" >&2
-  cat "$RUN/sink.log" 2>/dev/null >&2 || true
-  tail -20 "$RUN/mongosh.err" 2>/dev/null >&2 || true
-
-  printf '%s\n' "---------- 进程存活 ----------" >&2
-  if [ -n "$ETLER_PID" ]; then
-    ps -p "$ETLER_PID" -o pid=,stat=,command= >&2 2>/dev/null || printf 'etler 进程已退出\n' >&2
-  fi
-  if [ -n "$SINK_PID" ]; then
-    ps -p "$SINK_PID" -o pid=,stat=,command= >&2 2>/dev/null || printf 'sink.py 进程已退出\n' >&2
-  fi
-
-  printf '%s\n' "---------- mongod 上挂起的 getMore（判断 watcher 是否建了 change stream） ----------" >&2
-  docker exec "$MONGO_CT" mongosh --quiet \
-    -u "$MUSER" -p "$MPASS" --authenticationDatabase admin \
-    --eval 'printjson(db.currentOp({"op":"getmore"}).inprog.map(x=>({ns:x.ns, secs:x.secs_running, cmd:x.command})))' \
-    2>&1 | tail -30 >&2 || true
-
-  printf '%s\n' "---------- run/ 目录树 ----------" >&2
-  ls -laR "$RUN" >&2 2>/dev/null || true
-
-  printf '%s\n' "---------- docker logs (tail 20) ----------" >&2
-  docker logs --tail 20 "$MONGO_CT" >&2 2>&1 || true
-  printf '%s\n' "---------- 产物目录: $RUN ----------" >&2
+  printf '%s\n' "  产物目录: ${RUN}" >&2
+  printf '%s\n' "  服务日志（含栈）: ${RUN}/etler.log" >&2
+  printf '%s\n' "  原始报文: ${SINKLOG}" >&2
+  printf '%s\n' "  下游日志: ${RUN}/sink.log" >&2
+  printf '%s\n' "  Mongo 初始化错误: ${RUN}/mongosh.err" >&2
+  printf '%s\n' "  Mongo 容器: ${MONGO_CT}（容器日志按需自行查看）" >&2
   exit 1
 }
 
@@ -155,7 +129,7 @@ if [ "$GOMAJ" -lt 1 ] || { [ "$GOMAJ" -eq 1 ] && [ "$GOMIN" -lt 25 ]; }; then
 fi
 info "Go: $(go version)"
 
-FIXED_FILES=("config.json" "sink.py" "check.py" "check_vars.py" "initdb.d/01-keyfile.sh")
+FIXED_FILES=("config.json" "sink.py" "check.py" "check_vars.py" "scenarios.sh" "initdb.d/01-keyfile.sh")
 MISSING=0
 for f in "${FIXED_FILES[@]}"; do
   if [ ! -f "$WORK/$f" ]; then
@@ -417,13 +391,16 @@ if [ "$FULL" -eq 1 ]; then
     ok "重启续传通过（f 送达，Sync 次数保持 ${SYNC_AFTER}）"
 fi
 
+if [ "${SCENARIOS}" -eq 1 ]; then
+  # shellcheck source=scenarios.sh
+  . "$WORK/scenarios.sh"
+  run_scenarios
+fi
+
 # ---------- 8. 结果 ----------
-printf '\n%s\n' "==================== etler.log 关键行 ===================="
-grep -E "init watching|SyncTask|send:|saved resumeToken|ChangeStream end|succeed|will watch" "$RUN/etler.log" | tail -30 || true
-printf '%s\n' "==================== sink.log ===================="
-cat "$RUN/sink.log" || true
 printf '\n'
 ok "全部通过 ✅"
-printf '%s\n' "  运行产物目录: $RUN"
-printf '%s\n' "  原始报文: $SINKLOG"
-printf '%s\n' "  Mongo 容器: $MONGO_CT （重跑脚本会自动重建）"
+printf '%s\n' "  运行产物目录: ${RUN}"
+printf '%s\n' "  服务日志: ${RUN}/etler.log"
+printf '%s\n' "  原始报文: ${SINKLOG}"
+printf '%s\n' "  Mongo 容器: ${MONGO_CT} （重跑脚本会自动重建）"
