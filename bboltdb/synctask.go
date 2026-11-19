@@ -209,29 +209,39 @@ func (s *SyncTask) All(ctx context.Context) db.SyncTaskIterator {
 }
 
 func (s *SyncTask) InsertOrUpdate(ctx context.Context, task db.Task) {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("SyncTask.InsertOrUpdate")
+
 	select {
 	case <-ctx.Done():
 		return
 	default:
 	}
 
-	_ = s.db.Update(func(tx *bbolt.Tx) error {
+	err := s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(stBucketName))
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", stBucketName)
 		}
 		return b.Put([]byte(task.Id()), encodeTask(task))
 	})
+
+	if err != nil {
+		logger.Error(err)
+	}
 }
 
 func (s *SyncTask) InsertOrUpdateBatch(ctx context.Context, tasks []db.Task) {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("SyncTask.InsertOrUpdateBatch")
+
 	select {
 	case <-ctx.Done():
 		return
 	default:
 	}
 
-	_ = s.db.Update(func(tx *bbolt.Tx) error {
+	err := s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(stBucketName))
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", stBucketName)
@@ -243,32 +253,46 @@ func (s *SyncTask) InsertOrUpdateBatch(ctx context.Context, tasks []db.Task) {
 		}
 		return nil
 	})
+
+	if err != nil {
+		logger.Error(err)
+	}
 }
 
 func (s *SyncTask) Del(ctx context.Context, id string) {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("SyncTask.Del")
+
 	select {
 	case <-ctx.Done():
 		return
 	default:
 	}
 
-	_ = s.db.Update(func(tx *bbolt.Tx) error {
+	err := s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(stBucketName))
 		if b == nil {
 			return nil
 		}
 		return b.Delete([]byte(id))
 	})
+
+	if err != nil {
+		logger.Error(err)
+	}
 }
 
 func (s *SyncTask) DelBatch(ctx context.Context, ids []string) {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("SyncTask.DelBatch")
+
 	select {
 	case <-ctx.Done():
 		return
 	default:
 	}
 
-	_ = s.db.Update(func(tx *bbolt.Tx) error {
+	err := s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(stBucketName))
 		if b == nil {
 			return nil
@@ -280,6 +304,10 @@ func (s *SyncTask) DelBatch(ctx context.Context, ids []string) {
 		}
 		return nil
 	})
+
+	if err != nil {
+		logger.Error(err)
+	}
 }
 
 func (s *SyncTask) Clear(ctx context.Context) {

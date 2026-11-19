@@ -162,7 +162,10 @@ func (w *WatchCollection) LatestVersion(ctx context.Context) uint64 {
 }
 
 func (w *WatchCollection) Save(ctx context.Context, info []x.WatchInfo, version uint64) (oldVersion, nowVersion uint64) {
-	_ = w.db.Update(func(tx *bbolt.Tx) error {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("WatchCollection.Save")
+
+	err := w.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(wcBucketName))
 		if b == nil {
 			return nil
@@ -196,6 +199,11 @@ func (w *WatchCollection) Save(ctx context.Context, info []x.WatchInfo, version 
 		nowVersion = version
 		return nil
 	})
+
+	if err != nil {
+		logger.Error(err)
+	}
+
 	return oldVersion, nowVersion
 }
 
@@ -217,7 +225,10 @@ func (w *WatchCollection) Get(ctx context.Context, version uint64) []x.WatchInfo
 }
 
 func (w *WatchCollection) DelLessThan(ctx context.Context, version uint64) {
-	_ = w.db.Update(func(tx *bbolt.Tx) error {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("WatchCollection.DelLessThan")
+
+	err := w.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(wcBucketName))
 		if b == nil {
 			return nil
@@ -236,15 +247,24 @@ func (w *WatchCollection) DelLessThan(ctx context.Context, version uint64) {
 		}
 
 		for _, k := range toDelete {
-			b.Delete(k)
+			if err := b.Delete(k); err != nil {
+				return err
+			}
 		}
 
 		return nil
 	})
+
+	if err != nil {
+		logger.Error(err)
+	}
 }
 
 func (w *WatchCollection) MarkSyncing(ctx context.Context, version uint64) {
-	_ = w.db.Update(func(tx *bbolt.Tx) error {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("WatchCollection.MarkSyncing")
+
+	err := w.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(wcBucketName))
 		if b == nil {
 			return nil
@@ -269,6 +289,10 @@ func (w *WatchCollection) MarkSyncing(ctx context.Context, version uint64) {
 
 		return b.Put([]byte(wcKeyMetaSyncing), wcUint64ToBytes(version))
 	})
+
+	if err != nil {
+		logger.Error(err)
+	}
 }
 
 func (w *WatchCollection) NeedSyncing(ctx context.Context) (version uint64, need bool) {
@@ -289,15 +313,25 @@ func (w *WatchCollection) NeedSyncing(ctx context.Context) (version uint64, need
 }
 
 func (w *WatchCollection) ClearSyncingAndMarkSynced(ctx context.Context, version uint64) {
-	_ = w.db.Update(func(tx *bbolt.Tx) error {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("WatchCollection.ClearSyncingAndMarkSynced")
+
+	err := w.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(wcBucketName))
 		if b == nil {
 			return nil
 		}
 
-		b.Delete([]byte(wcKeyMetaSyncing))
+		if err := b.Delete([]byte(wcKeyMetaSyncing)); err != nil {
+			return err
+		}
+
 		return b.Put([]byte(wcKeyMetaSynced), wcUint64ToBytes(version))
 	})
+
+	if err != nil {
+		logger.Error(err)
+	}
 }
 
 func (w *WatchCollection) LatestSynced(ctx context.Context) (version uint64) {
@@ -317,7 +351,10 @@ func (w *WatchCollection) LatestSynced(ctx context.Context) (version uint64) {
 }
 
 func (w *WatchCollection) Clear(ctx context.Context) {
-	_ = w.db.Update(func(tx *bbolt.Tx) error {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("WatchCollection.Clear")
+
+	err := w.db.Update(func(tx *bbolt.Tx) error {
 		if err := tx.DeleteBucket([]byte(wcBucketName)); err != nil {
 			if err == errors.ErrBucketNotFound {
 				return nil
@@ -327,4 +364,8 @@ func (w *WatchCollection) Clear(ctx context.Context) {
 		_, err := tx.CreateBucket([]byte(wcBucketName))
 		return err
 	})
+
+	if err != nil {
+		logger.Error(err)
+	}
 }
