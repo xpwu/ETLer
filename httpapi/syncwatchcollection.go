@@ -21,7 +21,11 @@ func (s *suite) APIForceSyncColl(ctx context.Context, request *syncCollectionReq
 	if !etl.IsInWatchCollection(ctx, request.Collections) {
 		return &syncWcRes{false}
 	}
-	task.SyncTaskUpdater() <- task.SyncTaskDelta{Add: request.Collections, Del: []x.WatchInfo{}}
+	select {
+	case task.SyncTaskUpdater() <- task.SyncTaskDelta{Add: request.Collections, Del: []x.WatchInfo{}}:
+	case <-ctx.Done():
+		return &syncWcRes{false}
+	}
 
 	return &syncWcRes{true}
 }
