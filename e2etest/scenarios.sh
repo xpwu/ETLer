@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 运行：bash e2etest.sh --scenarios（主闭环 + --full 之后追加执行）
+# 运行：由 e2etest.sh 在基础闭环之后 source 并调用 run_scenarios()
+#   bash e2etest.sh              默认就会执行（无参数 = 全部 3 段）
+#   bash e2etest.sh --all        显式全跑（CI 推荐）
+#   bash e2etest.sh --scenarios  只跑「基础闭环 + 扩展场景」
 #
-# 默认不影响 `bash e2etest.sh` 与 `bash e2etest.sh --full` 的任何行为。
+# 注意：本文件不是独立模式。E11(fullDocument) / E14(demo.other 过滤) 依赖
+# 主闭环写入的 update(b) 与 demo.other.insert(x)；E10 会重启 sink.py 清空
+# sink.jsonl，所以内部顺序不可随意调整。单独 source 本文件跑 run_scenarios
+# 会因判定不到历史事件而失败。
+#
 # 所有产物落在 $RUN/，无隐藏文件。
 #
 # 中文文案里的变量一律写 ${VAR}（macOS bash 3.2 会吞掉 $VAR 后的多字节字符）。

@@ -8,9 +8,13 @@
 # 运行产物全部落在 <脚本同目录>/run/（非隐藏），每次重跑清空重建。
 # config.json 会被复制进 run/（exe.AbsDir 要求它与 etler 同目录），原文件不动。
 #
-# 运行：
-#   cd <repo>/e2etest && bash e2etest.sh
-#   cd <repo>/e2etest && bash e2etest.sh --full
+# 运行（默认跑全部 3 段，避免漏跑；显式给参数 = 只跑指定段）：
+#   cd <repo>/e2etest && bash e2etest.sh              # 默认全跑（3 段）
+#   cd <repo>/e2etest && bash e2etest.sh --all        # 显式全跑，CI 推荐
+#   cd <repo>/e2etest && bash e2etest.sh --full       # 基础闭环 + 故障重试/重启续传
+#   cd <repo>/e2etest && bash e2etest.sh --scenarios  # 基础闭环 + 扩展场景
+#   cd <repo>/e2etest && bash e2etest.sh --base-only  # 仅基础闭环（最快，调试用）
+#   cd <repo>/e2etest && bash e2etest.sh --help       # 完整说明
 #
 # 本地只需要：Docker（daemon 已启动）、Go >= 1.25、Python3。
 # macOS 已适配：自动补 docker CLI 的 PATH、等待 daemon、不用 seq。
@@ -20,14 +24,81 @@
 
 set -uo pipefail
 
-FULL=0
-[ "${1:-}" = "--full" ] && FULL=1
+# ---------- 运行模式 ----------
+# 默认跑全量：基础闭环 + 故障重试/重启续传(--full) + 扩展场景(--scenarios)。
+# e2e 默认就该最严 —— 否则 `bash e2etest.sh` 亮绿灯后很容易误以为全覆盖了。
+#
+# 一旦显式给出类别参数，就只跑「基础闭环 + 显式指定的段」：参数是白名单，
+# 不是开关叠加。基础闭环永远是底座，--full / --scenarios 都是它的追加段，
+# 不能脱离主闭环单独运行（扩展场景里的 E11/E14 依赖主闭环写入的
+# update(b) 和 demo.other.insert(x)）。
+#
+#   无参数 / --all        → 全部 3 段
+#   --full                → 基础闭环 + 故障重试/重启续传
+#   --scenarios           → 基础闭环 + 扩展场景
+#   --full --scenarios    → 全部 3 段
+#   --base-only / --quick → 仅基础闭环（旧的默认行为，调试用）
+#   未知参数              → 直接报错，不静默忽略
+BASE_ONLY=0
+WANT_ALL=0
+WANT_FULL=0
+WANT_SCENARIOS=0
+EXPLICIT=0
 
-SCENARIOS=0
+usage() {
+  cat <<'EOF'
+用法: bash e2etest.sh [模式...]
+
+默认（无参数）跑全部 3 段：基础闭环 + 故障重试/重启续传 + 扩展场景。
+显式指定模式时，只跑「基础闭环 + 指定的段」：
+
+  --all                     全部 3 段（显式写法，推荐 CI 使用）
+  --full                    基础闭环 + 故障重试/重启续传
+  --scenarios               基础闭环 + 扩展场景
+  --full --scenarios        全部 3 段
+  --base-only | --quick     仅基础闭环（最快，调试用）
+  -h | --help               显示本帮助
+
+基础闭环永远必跑；--full / --scenarios 是叠加段，不是独立模式。
+EOF
+}
+
 for _arg in "$@"; do
-  [ "$_arg" = "--full" ] && FULL=1
-  [ "$_arg" = "--scenarios" ] && SCENARIOS=1
+  case "$_arg" in
+    --all)               WANT_ALL=1;       EXPLICIT=1 ;;
+    --full)              WANT_FULL=1;      EXPLICIT=1 ;;
+    --scenarios)         WANT_SCENARIOS=1; EXPLICIT=1 ;;
+    --base-only|--quick) BASE_ONLY=1;      EXPLICIT=1 ;;
+    -h|--help)           usage; exit 0 ;;
+    *)
+      printf '%s\n' "[e2e] 未知参数: ${_arg}" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
 done
+
+if [ "$BASE_ONLY" -eq 1 ] && \
+   { [ "$WANT_ALL" -eq 1 ] || [ "$WANT_FULL" -eq 1 ] || [ "$WANT_SCENARIOS" -eq 1 ]; }; then
+  printf '%s\n' "[e2e] --base-only/--quick 不能与 --all/--full/--scenarios 同时指定" >&2
+  exit 1
+fi
+
+if [ "$EXPLICIT" -eq 0 ] || [ "$WANT_ALL" -eq 1 ]; then
+  FULL=1
+  SCENARIOS=1
+elif [ "$BASE_ONLY" -eq 1 ]; then
+  FULL=0
+  SCENARIOS=0
+else
+  FULL="$WANT_FULL"
+  SCENARIOS="$WANT_SCENARIOS"
+fi
+
+MODE_DESC="基础闭环"
+if [ "$FULL" -eq 1 ]; then MODE_DESC="${MODE_DESC} + --full"; fi
+if [ "${SCENARIOS}" -eq 1 ]; then MODE_DESC="${MODE_DESC} + --scenarios"; fi
+SEG_TOTAL=$((1 + FULL + SCENARIOS))
 
 MONGO_CT="etl-mongo-e2e"
 MUSER="root"
@@ -81,6 +152,7 @@ cd "$WORK" || exit 1
 info "仓库: $REPO"
 info "固定文件目录: $WORK"
 info "运行产物目录: $RUN"
+info "运行模式: ${MODE_DESC}（${SEG_TOTAL}/3 段，默认全跑；--help 查看如何只跑指定段）"
 
 # ---------- 1. 前置检查 ----------
 DOCKER_CANDS=(
@@ -129,7 +201,12 @@ if [ "$GOMAJ" -lt 1 ] || { [ "$GOMAJ" -eq 1 ] && [ "$GOMIN" -lt 25 ]; }; then
 fi
 info "Go: $(go version)"
 
-FIXED_FILES=("config.json" "sink.py" "check.py" "check_vars.py" "scenarios.sh" "initdb.d/01-keyfile.sh")
+FIXED_FILES=("config.json" "sink.py" "check.py" "check_vars.py" "initdb.d/01-keyfile.sh")
+# 只跑基础闭环时不需要 scenarios.sh
+if [ "${SCENARIOS}" -eq 1 ]; then
+  # 不用 += 数组写法，兼容 macOS 自带 bash 3.2 的最早期行为
+  FIXED_FILES[${#FIXED_FILES[@]}]="scenarios.sh"
+fi
 MISSING=0
 for f in "${FIXED_FILES[@]}"; do
   if [ ! -f "$WORK/$f" ]; then
@@ -137,7 +214,7 @@ for f in "${FIXED_FILES[@]}"; do
     MISSING=1
   fi
 done
-[ "$MISSING" -eq 0 ] || { printf '%s\n' "       请把四个固定文件放在 e2etest.sh 同路径下" >&2; exit 1; }
+[ "$MISSING" -eq 0 ] || { printf '%s\n' "       请把上面列出的固定文件放在 e2etest.sh 同路径下" >&2; exit 1; }
 ok "固定文件齐全"
 
 # ---------- 1.1 清理上一轮 e2e 环境（必须在端口检查之前） ----------
@@ -399,7 +476,7 @@ fi
 
 # ---------- 8. 结果 ----------
 printf '\n'
-ok "全部通过 ✅"
+ok "全部通过 ✅（${MODE_DESC}，${SEG_TOTAL}/3 段）"
 printf '%s\n' "  运行产物目录: ${RUN}"
 printf '%s\n' "  服务日志: ${RUN}/etler.log"
 printf '%s\n' "  原始报文: ${SINKLOG}"
