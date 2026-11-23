@@ -141,6 +141,24 @@ func watch(ctx context.Context, client *mongo.Client, resumeToken bson.Raw) *Str
 	return AsStreamError(cs.Err(), false)
 }
 
+func sendSyncAck(ctx context.Context, ch chan<- SyncAckChan) *StreamError {
+	syncAck := make(chan struct{}, 1)
+	select {
+	case ch <- syncAck:
+	case <-ctx.Done():
+		return AsStreamError(ctx.Err(), false)
+	}
+
+	// wait ack
+	select {
+	case <-syncAck:
+	case <-ctx.Done():
+		return AsStreamError(ctx.Err(), false)
+	}
+
+	return nil
+}
+
 // initWatching resumeToken 最后保存到的那个 ResumeToken
 func initWatching(ctx context.Context, client *mongo.Client) (resumeToken bson.Raw, stErr *StreamError) {
 	ctx, logger := log.WithCtx(ctx)
@@ -166,16 +184,8 @@ func initWatching(ctx context.Context, client *mongo.Client) (resumeToken bson.R
 		}
 	}
 
-	syncAck := make(chan struct{}, 1)
-	select {
-	case syncChan <- syncAck:
-	case <-ctx.Done():
-		return nil, AsStreamError(ctx.Err(), false)
-	}
-	select {
-	case <-syncAck:
-	case <-ctx.Done():
-		return nil, AsStreamError(ctx.Err(), false)
+	if err := sendSyncAck(ctx, syncChan); err != nil {
+		return nil, err
 	}
 
 	// 必须等待 sync ack 才能保存 resumeToken, 否则可能出现 sync 丢失的情况
