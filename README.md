@@ -1,10 +1,13 @@
 # ETLer
 
-mongodb： 1、抽取 chang stream；2、自动全量同步；3、自动重试；4、自动恢复
+mongodb： 1、抽取 change stream；2、自动全量同步；3、自动重试；4、自动恢复
 
 ### 服务运行
 
-1、编译出可指定文件 etl   
+1、编译出可执行文件 etl
+```
+go build -o etl ./main
+```
 2、etl -h 可查看运行命令，使用 etl pcjson 可以打印如下所示的配置文件，`// `开头的 key 是注释
 ```json
 {
@@ -85,8 +88,8 @@ mongodb： 1、抽取 chang stream；2、自动全量同步；3、自动重试�
 		],
 		"// SendToUrls": "send in order until successful",
 		"SendToUrls": [
-			"192.168.0.4:8080/etlbeta", 
-			"192.168.0.5:80/etl"
+			"http://192.168.0.4:8080/etlbeta", 
+			"http://192.168.0.5:80/etl"
 		]
 	},
 	"github.com/xpwu/go-log/log:config": {
@@ -97,7 +100,7 @@ mongodb： 1、抽取 chang stream；2、自动全量同步；3、自动重试�
 ```
 
 4、执行 ./etl 启动服务，-h 可以看到命令帮助   
-5、服务会在本地磁盘产生一个 bboltdb 目录，保存 etl 服务运行需要的数据
+5、服务会在本地磁盘产生一个 bboltdb 目录（内含 etlworkdb），保存运行状态及缓存读取到的 change stream 数据。停服重启后靠它续上之前的流程；可以通过 BackupDB 接口定期备份，见下文
 
 ### 数据发送
 
@@ -133,13 +136,21 @@ type Request struct {
 6、接口请求的顺序很重要，处理服务器需要按照请求的顺序处理所有的接口请求，否则会出现数据错乱    
 7、Ns 只有在Sync时才有意义    
 8、Data 中的数据一次最多1000条，也是需要严格按照顺序处理所有的数据   
-9、bson.Raw 表示的原始的bson数据，Sync是Document数据，ChangeStream是Event数据，处理服务器根据情况自行解析即可   
+9、bson.Raw 表示的原始的bson数据，Sync是Document数据，ChangeStream是Event数据，处理服务器根据情况自行解析即可
 
 ### 服务访问
 
 etl 提供 http(s) 协议的 API, 可以配置抽取的具体集合，数据格式为 json 格式。http:serverConfig 的配置项就是配置的此服务，
-按照示例，此服务器的 url 前缀为 192.168.0.3:8080/api/，提供如下的接口，所有接口都是 post 且是幂等的，接口调用成功返回 http 200   
-    
+按照示例，此服务器的 url 前缀为 192.168.0.3:8080/api/，提供如下的接口，所有接口都是 POST 且是幂等的，接口调用成功返回 http 200
+```
+/api/SetWatchCols
+/api/GetWatchCols
+/api/ClearWC
+/api/ForceSyncColl
+/api/ForceFullSync
+/api/BackupDB
+```
+
 0、基本数据结构定义
 ```go
 package x
@@ -149,7 +160,7 @@ type WatchInfo struct {
 	Collection string
 }
 ```
-    
+
 1、SetWatchCols  设置抽取的集合
 ```go
 type setWcReq struct {
@@ -164,14 +175,14 @@ type setWcRes struct {
 ```
 * version 为本次设置的版本号，返回的是本次设置之前的旧的版本号(oldver)与设置后最新的版本号(nowver)，
 * 如果新的请求的 version 不大于之前的版本，本次设置不会生效，也不会对服务有任何影响，
-* 通过 Res.NowVersion == setWcReq.Version && Res.OldVersion != setWcReq.Version 
-可以判断本次调用是否生效(但是，调用者一般不用关注本次调用是否生效，只需要关注接口访问是否成功)
+* 通过 Res.NowVersion == setWcReq.Version && Res.OldVersion != setWcReq.Version
+  可以判断本次调用是否生效(但是，调用者一般不用关注本次调用是否生效，只需要关注接口访问是否成功)
 
-***config 中的 config:watch --- Collections 说明：*** 
-* 配置文件中配置的抽取集合默认为 version = 0, 
-* 每次重启服务时，都会用最新的 Collections配置去更新抽取集合，如果旧的版本为0，进行更新，如果旧的版本不会0，不会实际更新数据，
-* api 设置的抽取集合，需要 version > 0 才会更新配置文件中设置的数据，api 一旦设置生效，配置文件的设置将不在生效(因为配置文件的设置版本为0)
-      
+***config 中的 config:watch --- Collections 说明：***
+* 配置文件中配置的抽取集合默认为 version = 0,
+* 每次重启服务时，都会用最新的 Collections配置去更新抽取集合，如果旧的版本为0，进行更新，如果旧的版本不为 0，不会实际更新数据，
+* api 设置的抽取集合，需要 version > 0 才会更新配置文件中设置的数据，api 一旦设置生效，配置文件的设置将不再生效(因为配置文件的设置版本为0)
+
 2、GetWatchCols  获取当前设置的抽取集合
 ```go
 type getWcRes struct {
@@ -183,10 +194,11 @@ type getWcRes struct {
 type getWcReq struct {
 }
 ```
-      
+* 没有配置任何集合时（例如刚调用过 ClearWC），watchInfos 返回 null，不是空数组，调用方按 null 或数组处理即可
+
 3、ClearWC 清除所有的抽取配置
 请求数据与响应数据都是空json  `{}`，清除后，如果不用 api 设置任何抽取数据，config:watch --- Collections 的数据将在下次重启时又生效
-     
+
 4、ForceSyncColl 强制全量同步某个指定的集合
 ```go
 type syncCollectionReq struct {
@@ -197,11 +209,11 @@ type syncWcRes struct {
 	Succeed bool
 }
 ```
-命令成功收到并处理即返回，不代表同步已经开始或已经完成，但只要返回了 succeed, 服务只要运行，后续一定保证能执行同步。   
+命令成功收到并处理即返回，不代表同步已经开始或已经完成，但只要返回了 succeed, 服务只要运行，后续一定保证能执行同步。
 
 5、ForceFullSync 强制全量同步所有抽取的集合   
 请求数据与响应数据都是空json  `{}`，返回即代表命令收到并处理成功，不代表同步已经开始或已经完成，但只要返回了 succeed, 服务只要运行，后续一定保证能执行同步。
-    
+
 6、BackupDB  备份 etl 服务运行的本地db
 ```go
 type backupReq struct {
@@ -222,12 +234,38 @@ etl 运行会在磁盘建立本地数据库，用于保存 etl 运行的状态�
 1、服务具有自动重试与自动恢复能力   
 2、服务有自己的缓存，etl 停服后重启，会自动续上之前的流程   
 3、数据的处理服务器即使较长时间停服，也不会影响本服务的工作，当处理服务器恢复后，会自动恢复数据的发送     
+4、抽取集合可以通过接口动态调整，即时生效，不需要重启   
+5、本地数据库可以定期备份，重启时用备份续上进度，省掉一次全量同步
 
+### 测试
+
+1、单元测试
+```
+go test ./... -count=1
+```
+涉及并发的用例可以加 -race：
+```
+go test ./bboltdb/ -race -count=1
+```
+
+2、端到端测试，需要 Docker（daemon 已启动）、Go >= 1.25、Python3，27017 / 8080 / 9000 三个端口空闲
+```
+cd <repo>/e2etest && bash e2etest.sh
+```
+默认跑全部 3 段：基础闭环、故障重试与重启续传、扩展场景。首次会拉 mongo:7 镜像，可能要等 1-3 分钟。只跑其中几段：
+```
+bash e2etest.sh --all          全部 3 段（CI 建议显式写上）
+bash e2etest.sh --full         基础闭环 + 故障重试/重启续传
+bash e2etest.sh --scenarios    基础闭环 + 扩展场景
+bash e2etest.sh --base-only    仅基础闭环，最快，改代码时用（也可写 --quick）
+bash e2etest.sh --help         查看全部参数
+```
+基础闭环永远必跑，--full / --scenarios 都是它的追加段。脚本每次会先清理上一轮的 Mongo 容器与进程，e2etest/ 下的固定文件不会被改动。
+
+3、运行产物全部落在 e2etest/run/（非隐藏），每次重跑清空：etler、config.json(副本)、etler.log、sink.jsonl、sink.log、mongosh.err、bboltdb/。
+失败时命令行只打印产物路径，不展开日志；完整报文、日志和 Go 的 goroutine 栈都在 run/ 里。
 
 ### 使用建议
 1、对于一类抽取目标，应该只运行一个 etl 服务，不应对 etl 做热备   
 2、通过接口设置需要抽取的集合，可以放在接口调用服务的启动阶段，因为 etl 接口的幂等性，接口的调用可以多台并发或重复请求     
-3、每日备份一次 etl 的本地工作数据库   
-
-
-
+3、每日备份一次 etl 的本地工作数据库
