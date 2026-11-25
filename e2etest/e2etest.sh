@@ -269,8 +269,15 @@ stop_previous_run() {
 
 stop_previous_run
 
-python3 "$WORK/check_vars.py" "$WORK/e2etest.sh" \
-  || { printf '%s\n' "e2etest.sh 存在裸 \$VAR 紧贴中文字符，请先改成 \${VAR} 再运行" >&2; exit 1; }
+# scenarios.sh 默认就会被 source，中文文案同样受 macOS bash 3.2 的多字节吞变量问题影响，
+# 必须一起扫；--base-only 时不加载它，缺文件也不该因此报错。
+SCAN_FILES=("$WORK/e2etest.sh")
+if [ "${SCENARIOS}" -eq 1 ]; then
+  # 不用数组 +=，兼容 macOS 自带 bash 3.2
+  SCAN_FILES[${#SCAN_FILES[@]}]="$WORK/scenarios.sh"
+fi
+python3 "$WORK/check_vars.py" "${SCAN_FILES[@]}" \
+  || { printf '%s\n' "存在裸 \$VAR 紧贴中文字符，请先改成 \${VAR} 再运行" >&2; exit 1; }
 
 # 给 Docker Desktop 一点时间释放 27017；若仍占用，把占用者列出来
 PORT_OK=0
