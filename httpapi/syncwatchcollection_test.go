@@ -108,3 +108,61 @@ func TestSyncWcResJSON(t *testing.T) {
 		t.Fatalf("JSON = %s, want %s", bs, want)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ctx 已取消 + 无接收方：handler 必须立即返回 Succeed=false，不得挂死。
+// ---------------------------------------------------------------------------
+func TestAPIForceSyncCollRespectsCanceledCtx(t *testing.T) {
+	stub := installWatchCollectionStub(t)
+	stub.latestVersion = 5
+	stub.versions[5] = []x.WatchInfo{wi("db1", "A")}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// 故意不启动 startDeltaReceiver：updateSyncTaskChan 无缓冲且无接收方。
+	done := make(chan *syncWcRes, 1)
+	go func() {
+		done <- (&suite{}).APIForceSyncColl(ctx, &syncCollectionReq{
+			Collections: []x.WatchInfo{wi("db1", "A")},
+		})
+	}()
+
+	select {
+	case res := <-done:
+		if res == nil || res.Succeed {
+			t.Fatalf("ctx 已取消应返回 Succeed=false, got %+v", res)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ctx 已取消但 handler 仍阻塞在无缓冲的 SyncTaskUpdater send 上")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ctx 在等待期间取消：先让 delta 接收方就位但不取走，用短 deadline 触发取消。
+// 与上一个用例互补，覆盖「两个 case 都不 ready → 之后 ctx.Done() 变 ready」。
+// ---------------------------------------------------------------------------
+func TestAPIForceSyncCollRespectsCtxDeadline(t *testing.T) {
+	stub := installWatchCollectionStub(t)
+	stub.latestVersion = 5
+	stub.versions[5] = []x.WatchInfo{wi("db1", "A")}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	done := make(chan *syncWcRes, 1)
+	go func() {
+		done <- (&suite{}).APIForceSyncColl(ctx, &syncCollectionReq{
+			Collections: []x.WatchInfo{wi("db1", "A")},
+		})
+	}()
+
+	select {
+	case res := <-done:
+		if res == nil || res.Succeed {
+			t.Fatalf("ctx 超时后应返回 Succeed=false, got %+v", res)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ctx 超时后 handler 仍未返回")
+	}
+}
