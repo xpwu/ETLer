@@ -398,8 +398,9 @@ func TestWatchCollectionUpdatedConcurrent(t *testing.T) {
 }
 
 // 说明：
-//   - Start() 会进入 InitTaskFromConfig 的 5s 重试循环，并启动
-//     changestream.StartWatching() / task.Start() 两个常驻 goroutine，
-//     没有注入点且会污染测试进程，单测不覆盖。
+//   - Start() 里 InitTaskFromConfig 不再返回成功标志：本地 DB 故障会直接
+//     panic 传播到 main，由外部守护重启；随后启动
+//     changestream.StartWatching() / task.Start() 两个常驻 goroutine。
+//     Start() 没有注入点且会污染测试进程，单测不覆盖。
 //   - WatchCollectionUpdated() 两侧信号的实际投递结果由
 //     etl/task 与 etl/changestream 各自包内的通道用例覆盖。

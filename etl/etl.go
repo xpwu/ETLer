@@ -7,19 +7,10 @@ import (
 	"github.com/xpwu/ETLer/etl/task"
 	"github.com/xpwu/ETLer/x"
 	"github.com/xpwu/go-log/log"
-	"time"
 )
 
 func Start() {
-	ctx, logger := log.WithCtx(context.TODO())
-	for {
-		if task.InitTaskFromConfig(ctx) {
-			break
-		}
-		logger.Error("initTaskFromConfig error, will retry after 5s")
-		time.Sleep(5 * time.Second)
-	}
-
+	task.InitTaskFromConfig(context.TODO())
 	changestream.StartWatching()
 	task.Start()
 }

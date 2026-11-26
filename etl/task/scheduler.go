@@ -260,19 +260,13 @@ func deltaSyncTaskify(ctx context.Context) {
 	db.WatchCollection().DelLessThan(ctx, latestVer)
 }
 
-func InitTaskFromConfig(ctx context.Context) (succeed bool) {
-	succeed = true
+func InitTaskFromConfig(ctx context.Context) {
 	ctx, logger := log.WithCtx(ctx)
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error(r)
-			succeed = false
-		}
-	}()
+	logger.PushPrefix("InitTaskFromConfig")
 
 	oldVersion := db.WatchCollection().LatestVersion(ctx)
 	if oldVersion != db.ConfigVersion {
-		return true
+		return
 	}
 
 	old := db.WatchCollection().Get(ctx, oldVersion)
@@ -283,5 +277,5 @@ func InitTaskFromConfig(ctx context.Context) (succeed bool) {
 	db.WatchCollection().Save(ctx, config.Watch.Collections, db.ConfigVersion)
 	db.WatchCollection().ClearSyncingAndMarkSynced(ctx, db.ConfigVersion)
 
-	return true
+	logger.Info("succeed")
 }

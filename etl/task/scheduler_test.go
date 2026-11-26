@@ -333,9 +333,7 @@ func TestInitTaskFromConfigSkipsWhenAPIVersion(t *testing.T) {
 	// 已有 API 设置的版本时，配置文件不能覆盖
 	wc.latestVersion = 1
 
-	if !InitTaskFromConfig(context.Background()) {
-		t.Fatal("succeed 应为 true")
-	}
+	InitTaskFromConfig(context.Background())
 	if len(st.Ops()) != 0 || len(wc.Ops()) != 0 {
 		t.Fatalf("不应产生任何副作用: st=%+v wc=%+v", st.Ops(), wc.Ops())
 	}
@@ -350,9 +348,7 @@ func TestInitTaskFromConfigApplies(t *testing.T) {
 	wc.versions[0] = infos("old")
 	wc.latestVersion = 0
 
-	if !InitTaskFromConfig(context.Background()) {
-		t.Fatal("succeed 应为 true")
-	}
+	InitTaskFromConfig(context.Background())
 
 	// 先按配置差异更新任务
 	sops := st.Ops()
@@ -379,13 +375,24 @@ func TestInitTaskFromConfigApplies(t *testing.T) {
 	}
 }
 
-// InitTaskFromConfig 内置 recover，panic 时返回 false 而不是让进程崩溃
-func TestInitTaskFromConfigRecoversFromPanic(t *testing.T) {
+// InitTaskFromConfig 不再吞 panic：本地 DB 故障按全局契约向上传播，
+// 由 main goroutine 结束进程，交给外部守护拉起。
+func TestInitTaskFromConfigPanicsOnDBFailure(t *testing.T) {
 	defer installStubs(t) // 恢复全局单例，避免影响后续用例
 
 	db.SetWatchCollection(nil) // 内嵌 nil 接口，调用方法会 panic
-	if InitTaskFromConfig(context.Background()) {
-		t.Fatal("发生 panic 时 succeed 应为 false")
+
+	panicked := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+			}
+		}()
+		InitTaskFromConfig(context.Background())
+	}()
+	if !panicked {
+		t.Fatal("不可恢复异常应直接 panic 传播，不应被吞掉")
 	}
 }
 
