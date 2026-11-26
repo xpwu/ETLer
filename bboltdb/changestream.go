@@ -17,7 +17,7 @@ const (
 	csKeyStreamFmt    = "%016x"
 	csKeyLastSent     = "lastsent"
 
-	// 阈值：已发送未清理的数量超过此值时触发 compact
+	// 阈值：已发送未清理的数量达到此值时触发 compact
 	csCompactThreshold = uint64(1000)
 )
 

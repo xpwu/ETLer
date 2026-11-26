@@ -124,6 +124,12 @@ func (db *DB) Backup(ctx context.Context) (backupName string, err error) {
 		logger.Error(err)
 		return "", err
 	}
+
+	// 这里按 POSIX 行为写：f 还开着就 os.Rename，POSIX 允许 rename 已打开的文件，
+	// 页缓存里的内容也仍可读，所以备份可用。已知两个限制，当前部署接受：
+	//   1) Windows 不允许 rename 仍被打开的文件，这一步会直接失败；
+	//   2) 没有 f.Sync()，进程崩溃时页缓存可能未落盘，备份文件可能不完整。
+	// 若要跨平台或保证崩溃安全，应 f.Sync() 后先 Close，再 Rename。
 	defer f.Close()
 
 	if _, err = tx.WriteTo(f); err != nil {
