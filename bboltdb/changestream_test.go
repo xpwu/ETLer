@@ -33,11 +33,8 @@ func mustSave(t *testing.T, cs *ChangeStream, token, value string) db.StreamId {
 		v = db.StreamValue([]byte(value))
 	}
 
-	id, err := cs.Save(context.Background(), rt, v)
-	if err != nil {
-		t.Fatalf("Save failed: %v", err)
-	}
-	return id
+	// Save 现在只返回 id；本地 DB 事务失败直接 panic（由 panic_contract_test.go 覆盖）。
+	return cs.Save(context.Background(), rt, v)
 }
 
 func readLastSent(t *testing.T, cs *ChangeStream) (uint64, bool) {

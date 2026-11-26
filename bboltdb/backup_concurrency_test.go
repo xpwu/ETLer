@@ -82,10 +82,10 @@ func TestBackupFileIsValidBoltDB(t *testing.T) {
 func TestBackupFailureLeavesNoTempFile(t *testing.T) {
 	d, abs := newBackupDB(t)
 
-	// 注册一个真实的 CompactAble，覆盖「Compact 在已关闭 DB 上不 panic」
-	if _, err := NewChangeStream(context.Background(), d); err != nil {
-		t.Fatalf("NewChangeStream failed: %v", err)
-	}
+	// 不注册 CompactAble：Backup 会先遍历 CompactAbles 调 Compact，而 Compact
+	// 现在遵循「DB 事务失败直接 panic」契约，注册会让本用例在 Compact 阶段
+	// 就 panic，测不到 Begin(false) 失败返回 error 这条路径。
+	// Compact 的 panic 契约由 panic_contract_test.go 单独覆盖。
 
 	if err := d.Underlying.Close(); err != nil {
 		t.Fatalf("Close failed: %v", err)
@@ -121,11 +121,9 @@ func TestBackupDuringWritesProducesReadableFile(t *testing.T) {
 
 	// 先同步写几条，保证快照里确实有内容，不是空库
 	for i := 0; i < 5; i++ {
-		if _, err := cs.Save(ctx,
+		cs.Save(ctx,
 			db.ResumeToken([]byte(fmt.Sprintf("seedtok%d", i))),
-			db.StreamValue([]byte(fmt.Sprintf("seedv%d", i)))); err != nil {
-			t.Fatalf("预热 Save(%d) failed: %v", i, err)
-		}
+			db.StreamValue([]byte(fmt.Sprintf("seedv%d", i))))
 	}
 
 	stop := make(chan struct{})
@@ -139,7 +137,7 @@ func TestBackupDuringWritesProducesReadableFile(t *testing.T) {
 				return
 			default:
 			}
-			_, _ = cs.Save(ctx,
+			cs.Save(ctx,
 				db.ResumeToken([]byte(fmt.Sprintf("tok%d", i))),
 				db.StreamValue([]byte(fmt.Sprintf("v%d", i))))
 		}

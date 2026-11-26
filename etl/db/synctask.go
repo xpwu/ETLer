@@ -29,6 +29,7 @@ type SyncTaskIterator interface {
 // SyncTaskDBer 无需支持并发，但在迭代器 Next() 遍历期间，会调用 InsertOrUpdate 更新 Current() 的 Task
 // 已经同步完的 Task 需要调用 Del / DelBatch 删除
 // 只同步了部分文档的 Task 需要重置该 Task 的 UntilDocId 后，调用 InsertOrUpdate / InsertOrUpdateBatch 更新该 Task
+// 所有接口出现服务不可运行的异常，直接 panic
 type SyncTaskDBer interface {
 	All(ctx context.Context) SyncTaskIterator
 

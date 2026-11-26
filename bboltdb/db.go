@@ -45,6 +45,7 @@ func Init() error {
 
 const dbName = "etlworkdb"
 
+// CompactAble 出现服务不可运行的异常，直接 panic
 type CompactAble interface {
 	Compact(ctx context.Context)
 }
@@ -127,14 +128,14 @@ func (db *DB) Backup(ctx context.Context) (backupName string, err error) {
 
 	if _, err = tx.WriteTo(f); err != nil {
 		logger.Error(err)
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return "", err
 	}
 
 	// 原子 rename
 	if err = os.Rename(tmpPath, backupPath); err != nil {
 		logger.Error(err)
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return "", err
 	}
 

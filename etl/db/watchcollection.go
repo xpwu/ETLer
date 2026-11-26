@@ -9,6 +9,7 @@ import (
 const ConfigVersion uint64 = 0
 
 // WatchCollectionDBer 所有接口都可能并发
+// 所有接口出现服务不可运行的异常，直接 panic
 type WatchCollectionDBer interface {
 	LatestVersion(ctx context.Context) uint64
 	// Save latestVersion >= version 什么也不改变

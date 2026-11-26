@@ -189,11 +189,8 @@ func initWatching(ctx context.Context, client *mongo.Client) (resumeToken bson.R
 	}
 
 	// 必须等待 sync ack 才能保存 resumeToken, 否则可能出现 sync 丢失的情况
-	id, err := db.ChangeStream().Save(ctx, resumeToken, nil)
-	if err != nil {
-		logger.Error(fmt.Sprintf("save error. %s", err.Error()))
-		return nil, AsStreamError(err, false)
-	}
+	id := db.ChangeStream().Save(ctx, resumeToken, nil)
+
 	db.ChangeStream().MarkSentUpTo(ctx, id)
 
 	logger.Info("succeed")
@@ -265,20 +262,12 @@ func (csr *changeStreamRunner) processStream(cs *mongo.ChangeStream) *StreamErro
 
 	if csr.watchColl[cid] && ce.OperationType != "invalidate" {
 		logger.Debug("save resumeToken and changeStream")
-		_, err = db.ChangeStream().Save(csr.ctx, resumeToken, cs.Current)
-		if err != nil {
-			logger.Error(fmt.Sprintf("db.ChangeStream().Save(resumeToken, changeStream) err. %s", err.Error()))
-			return AsStreamError(err, false)
-		}
+		db.ChangeStream().Save(csr.ctx, resumeToken, cs.Current)
 		logger.Info("saved resumeToken and changeStream: ", ce.String())
 		postStreamChanged()
 	} else {
 		logger.Debug(ce.String(), "is NOT in the Watching Collections, will only save resumeToken")
-		_, err = db.ChangeStream().Save(csr.ctx, resumeToken, nil)
-		if err != nil {
-			logger.Error(fmt.Sprintf("db.ChangeStream().Save(resumeToken, nil) err. %s", err.Error()))
-			return AsStreamError(err, false)
-		}
+		db.ChangeStream().Save(csr.ctx, resumeToken, nil)
 		logger.Info("only saved resumeToken. ", ce.String())
 	}
 

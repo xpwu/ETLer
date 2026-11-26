@@ -45,11 +45,12 @@ type ChangeStreamIterator interface {
 
 // ChangeStreamDBer Save / DeleteAll 不会被并发调用，这两个方法相互之间也不会并发调用，
 // 但是 Save / DeleteAll 与其它方法相互之间会并发调用，其它方法本身也可能并发调用
+// 所有接口出现服务不可运行的异常，直接 panic
 type ChangeStreamDBer interface {
 	// Save resumeToken 可作为唯一key使用，不会传入nil; value 是真正的值，如果没有值，就传 nil
 	// 必须按照 Save 的调用顺序有序的保存 resumeToken 与 value 的值，在迭代器获取 value 时，必须按照顺序返回 value
 	// 返回的 id 必须是唯一的，可能作为 MarkSentUpTo 的一个参数，标记已发送点
-	Save(ctx context.Context, resumeToken ResumeToken, value StreamValue) (id StreamId, err error)
+	Save(ctx context.Context, resumeToken ResumeToken, value StreamValue) (id StreamId)
 	DeleteAll(ctx context.Context)
 
 	// MarkSentUpTo 标记已发的截止 StreamId，表示在 id 之前的(也包括 id 本身这一条)都已发送

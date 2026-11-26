@@ -167,36 +167,44 @@ func TestDeleteAllConcurrentWithCompact(t *testing.T) {
 	}
 
 	// 交错结束后 DeleteAll 的「提交后重置」仍应生效：下一次 Save 从 id=1 开始
-	if id, err := cs.Save(ctx,
+	id := cs.Save(ctx,
 		db.ResumeToken([]byte("after")),
-		db.StreamValue([]byte("v"))); err != nil {
-		t.Fatalf("交错后 Save failed: %v", err)
-	} else if csBytesToUint64(id) != 1 {
+		db.StreamValue([]byte("v")))
+	if csBytesToUint64(id) != 1 {
 		t.Fatalf("交错后首个 id = %d, want 1（DeleteAll 的 currentSeq 重置丢失）", csBytesToUint64(id))
 	}
 }
 
 // ---------------------------------------------------------------------------
-// 用例 4（护栏）：Update 失败时内存状态不得领先于未提交的事务
+// 用例 4（契约）：本地 DB 事务失败必须 panic，且内存状态不得领先于未提交的事务。
 //
-// 用关闭底层 DB 注入 Begin 失败。556c 把 currentSeq 的清零写在回调内，但
-// Begin 失败时 fn 根本不执行，所以旧代码同样 PASS —— 它只是护栏，不是
-// 修前 FAIL 的复现。真正能区分的 Commit 失败路径外部无法稳定注入
-// （bbolt 无公开 Commit hook），故不伪造。
+// 用关闭底层 DB 注入 Begin 失败。DeleteAll 把 currentSeq 重置放在 Update
+// 成功返回之后；fn 根本不执行 → currentSeq 保持不变 → 随后 panic。
+// 真正能区分的 Commit 失败路径外部无法稳定注入（bbolt 无公开 Commit hook），故不伪造。
 // ---------------------------------------------------------------------------
-func TestDeleteAllKeepsSeqWhenDBClosed(t *testing.T) {
+func TestDeleteAllPanicsOnClosedDB(t *testing.T) {
 	cs, underlying := stateOpenCS(t)
 	for i := 0; i < 3; i++ {
-		if _, err := cs.Save(context.Background(),
+		cs.Save(context.Background(),
 			db.ResumeToken([]byte(fmt.Sprintf("t%d", i))),
-			db.StreamValue([]byte(fmt.Sprintf("v%d", i)))); err != nil {
-			t.Fatalf("Save failed: %v", err)
-		}
+			db.StreamValue([]byte(fmt.Sprintf("v%d", i))))
 	}
 	before := cs.currentSeq
 
 	_ = underlying.Close()
-	cs.DeleteAll(context.Background())
+
+	panicked := false
+	func() {
+		defer func() {
+			if recover() != nil {
+				panicked = true
+			}
+		}()
+		cs.DeleteAll(context.Background())
+	}()
+	if !panicked {
+		t.Fatal("DeleteAll 在底层 DB 关闭后应 panic（服务不可运行异常）")
+	}
 
 	if cs.currentSeq != before {
 		t.Fatalf("Update 失败后 currentSeq = %d, want %d（内存状态不应领先于未提交的事务）",
@@ -214,11 +222,9 @@ func TestCompactKeepsUnsentTail(t *testing.T) {
 
 	const total = int(csCompactThreshold) + 5 // 1005
 	for i := 1; i <= total; i++ {
-		if _, err := cs.Save(ctx,
+		cs.Save(ctx,
 			db.ResumeToken([]byte(fmt.Sprintf("t%d", i))),
-			db.StreamValue([]byte(fmt.Sprintf("v%d", i)))); err != nil {
-			t.Fatalf("Save(%d) failed: %v", i, err)
-		}
+			db.StreamValue([]byte(fmt.Sprintf("v%d", i))))
 	}
 
 	// lastsent=1002；后面 1003/1004/1005 是有效 value，MarkSentUpTo 不会跨过

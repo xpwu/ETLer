@@ -122,14 +122,14 @@ func NewChangeStream(ctx context.Context, db *DB) (*ChangeStream, error) {
 
 // Save / DeleteAll 不会被并发调用，这两个方法相互之间也不会并发调用，
 // 但是 Save / DeleteAll 与其它方法相互之间会并发调用，其它方法本身也可能并发调用
-func (c *ChangeStream) Save(ctx context.Context, resumeToken db.ResumeToken, value db.StreamValue) (id db.StreamId, err error) {
+func (c *ChangeStream) Save(ctx context.Context, resumeToken db.ResumeToken, value db.StreamValue) (id db.StreamId) {
 	ctx, logger := log.WithCtx(ctx)
-	logger.PushPrefix("change stream:save")
+	logger.PushPrefix("ChangeStream.Save")
 
 	c.currentSeq++
 	id = csUint64ToBytes(c.currentSeq)
 
-	err = c.db.Update(func(tx *bbolt.Tx) error {
+	err := c.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(csBucketName))
 		entry := &csEntry{resumeToken: resumeToken, value: value}
 		return b.Put(csKeyStream(csBytesToUint64(id)), csEncodeEntry(entry))
@@ -138,17 +138,19 @@ func (c *ChangeStream) Save(ctx context.Context, resumeToken db.ResumeToken, val
 		// 回滚序号（避免空洞，可选）
 		c.currentSeq--
 		logger.Error(err)
-		return nil, err
+
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 
-	return id, nil
+	return id
 }
 
 func (c *ChangeStream) MarkSentUpTo(ctx context.Context, id db.StreamId) {
 	streamId := csBytesToUint64(id)
 	wrote := false
 	ctx, logger := log.WithCtx(ctx)
-	logger.PushPrefix("MarkSentUpTo")
+	logger.PushPrefix("ChangeStream.MarkSentUpTo")
 
 	// 只能向后推进，不能回退
 	err := c.db.Update(func(tx *bbolt.Tx) error {
@@ -188,7 +190,8 @@ func (c *ChangeStream) MarkSentUpTo(ctx context.Context, id db.StreamId) {
 
 	if err != nil {
 		logger.Error(err)
-		return
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 
 	// 触发清理检查
@@ -205,7 +208,10 @@ func (c *ChangeStream) AllNotSent(ctx context.Context) db.ChangeStreamIterator {
 
 func (c *ChangeStream) LastStreamId() db.StreamId {
 	var lastId db.StreamId = csUint64ToBytes(0)
-	_ = c.db.View(func(tx *bbolt.Tx) error {
+	// 接口没有 ctx 参数，只能用 Background 记日志；不改接口签名，避免牵动其它实现。
+	_, logger := log.WithCtx(context.Background())
+	logger.PushPrefix("ChangeStream.LastStreamId")
+	err := c.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(csBucketName))
 		if b == nil {
 			return nil
@@ -219,11 +225,18 @@ func (c *ChangeStream) LastStreamId() db.StreamId {
 		}
 		return nil
 	})
+	if err != nil {
+		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
+	}
 	return lastId
 }
 
 func (c *ChangeStream) ResumeToken(ctx context.Context) (resumeToken db.ResumeToken) {
-	_ = c.db.View(func(tx *bbolt.Tx) error {
+	_, logger := log.WithCtx(ctx)
+	logger.PushPrefix("ChangeStream.ResumeToken")
+	err := c.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(csBucketName))
 		if b == nil {
 			return nil
@@ -239,6 +252,11 @@ func (c *ChangeStream) ResumeToken(ctx context.Context) (resumeToken db.ResumeTo
 		}
 		return nil
 	})
+	if err != nil {
+		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
+	}
 	return
 }
 
@@ -246,7 +264,7 @@ func (c *ChangeStream) ResumeToken(ctx context.Context) (resumeToken db.ResumeTo
 // 但是 Save / DeleteAll 与其它方法相互之间会并发调用，其它方法本身也可能并发调用
 func (c *ChangeStream) DeleteAll(ctx context.Context) {
 	ctx, logger := log.WithCtx(ctx)
-	logger.PushPrefix("DeleteAll")
+	logger.PushPrefix("ChangeStream.DeleteAll")
 
 	err := c.db.Update(func(tx *bbolt.Tx) error {
 		// 直接删 bucket
@@ -264,7 +282,8 @@ func (c *ChangeStream) DeleteAll(ctx context.Context) {
 
 	if err != nil {
 		logger.Error(err)
-		return
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 
 	// 只有事务真正提交成功才重置内存状态
@@ -274,7 +293,7 @@ func (c *ChangeStream) DeleteAll(ctx context.Context) {
 // Compact 清理已发送数据，保留最后一条 sent（保证 ResumeToken 始终有数据）
 func (c *ChangeStream) Compact(ctx context.Context) {
 	ctx, logger := log.WithCtx(ctx)
-	logger.PushPrefix("Compact")
+	logger.PushPrefix("ChangeStream.Compact")
 
 	err := c.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(csBucketName))
@@ -318,7 +337,9 @@ func (c *ChangeStream) Compact(ctx context.Context) {
 		}
 
 		for _, k := range toDelete {
-			_ = b.Delete(k)
+			if err := b.Delete(k); err != nil {
+				return err
+			}
 		}
 
 		return nil
@@ -326,6 +347,8 @@ func (c *ChangeStream) Compact(ctx context.Context) {
 
 	if err != nil {
 		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 }
 

@@ -191,8 +191,8 @@ type stubChangeStreamDB struct {
 	lastId db.StreamId
 }
 
-func (m *stubChangeStreamDB) Save(ctx context.Context, rt db.ResumeToken, v db.StreamValue) (db.StreamId, error) {
-	return nil, nil
+func (m *stubChangeStreamDB) Save(ctx context.Context, rt db.ResumeToken, v db.StreamValue) db.StreamId {
+	return nil
 }
 
 func (m *stubChangeStreamDB) DeleteAll(ctx context.Context) {}

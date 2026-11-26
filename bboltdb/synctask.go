@@ -186,6 +186,8 @@ func NewSyncTask(ctx context.Context, db *DB) (st *SyncTask, err error) {
 
 func (s *SyncTask) All(ctx context.Context) db.SyncTaskIterator {
 	tasks := make([]db.Task, 0, 4)
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("SyncTask.All")
 
 	err := s.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(stBucketName))
@@ -202,7 +204,9 @@ func (s *SyncTask) All(ctx context.Context) db.SyncTaskIterator {
 		})
 	})
 	if err != nil {
-		return &syncTaskIter{err: err, released: true}
+		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 
 	return &syncTaskIter{tasks: tasks}
@@ -228,6 +232,8 @@ func (s *SyncTask) InsertOrUpdate(ctx context.Context, task db.Task) {
 
 	if err != nil {
 		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 }
 
@@ -256,6 +262,8 @@ func (s *SyncTask) InsertOrUpdateBatch(ctx context.Context, tasks []db.Task) {
 
 	if err != nil {
 		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 }
 
@@ -279,6 +287,8 @@ func (s *SyncTask) Del(ctx context.Context, id string) {
 
 	if err != nil {
 		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 }
 
@@ -307,17 +317,22 @@ func (s *SyncTask) DelBatch(ctx context.Context, ids []string) {
 
 	if err != nil {
 		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 }
 
 func (s *SyncTask) Clear(ctx context.Context) {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("SyncTask.Clear")
+
 	select {
 	case <-ctx.Done():
 		return
 	default:
 	}
 
-	_ = s.db.Update(func(tx *bbolt.Tx) error {
+	err := s.db.Update(func(tx *bbolt.Tx) error {
 		if err := tx.DeleteBucket([]byte(stBucketName)); err != nil {
 			if err == errors.ErrBucketNotFound {
 				return nil
@@ -327,4 +342,9 @@ func (s *SyncTask) Clear(ctx context.Context) {
 		_, err := tx.CreateBucket([]byte(stBucketName))
 		return err
 	})
+	if err != nil {
+		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
+	}
 }

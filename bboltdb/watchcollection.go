@@ -144,7 +144,9 @@ func NewWatchCollection(ctx context.Context, db *DB) (wc *WatchCollection, err e
 
 func (w *WatchCollection) LatestVersion(ctx context.Context) uint64 {
 	var version uint64
-	_ = w.db.View(func(tx *bbolt.Tx) error {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("WatchCollection.LatestVersion")
+	err := w.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(wcBucketName))
 		if b == nil {
 			return nil
@@ -158,6 +160,11 @@ func (w *WatchCollection) LatestVersion(ctx context.Context) uint64 {
 		}
 		return nil
 	})
+	if err != nil {
+		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
+	}
 	return version
 }
 
@@ -202,6 +209,8 @@ func (w *WatchCollection) Save(ctx context.Context, info []x.WatchInfo, version 
 
 	if err != nil {
 		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 
 	return oldVersion, nowVersion
@@ -209,7 +218,9 @@ func (w *WatchCollection) Save(ctx context.Context, info []x.WatchInfo, version 
 
 func (w *WatchCollection) Get(ctx context.Context, version uint64) []x.WatchInfo {
 	var result []x.WatchInfo
-	_ = w.db.View(func(tx *bbolt.Tx) error {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("WatchCollection.Get")
+	err := w.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(wcBucketName))
 		if b == nil {
 			return nil
@@ -221,6 +232,11 @@ func (w *WatchCollection) Get(ctx context.Context, version uint64) []x.WatchInfo
 		result = decodeWatchInfos(raw)
 		return nil
 	})
+	if err != nil {
+		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
+	}
 	return result
 }
 
@@ -257,6 +273,8 @@ func (w *WatchCollection) DelLessThan(ctx context.Context, version uint64) {
 
 	if err != nil {
 		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 }
 
@@ -292,11 +310,15 @@ func (w *WatchCollection) MarkSyncing(ctx context.Context, version uint64) {
 
 	if err != nil {
 		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 }
 
 func (w *WatchCollection) NeedSyncing(ctx context.Context) (version uint64, need bool) {
-	_ = w.db.View(func(tx *bbolt.Tx) error {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("WatchCollection.NeedSyncing")
+	err := w.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(wcBucketName))
 		if b == nil {
 			return nil
@@ -309,6 +331,11 @@ func (w *WatchCollection) NeedSyncing(ctx context.Context) (version uint64, need
 		need = true
 		return nil
 	})
+	if err != nil {
+		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
+	}
 	return version, need
 }
 
@@ -331,11 +358,15 @@ func (w *WatchCollection) ClearSyncingAndMarkSynced(ctx context.Context, version
 
 	if err != nil {
 		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 }
 
 func (w *WatchCollection) LatestSynced(ctx context.Context) (version uint64) {
-	_ = w.db.View(func(tx *bbolt.Tx) error {
+	ctx, logger := log.WithCtx(ctx)
+	logger.PushPrefix("WatchCollection.LatestSynced")
+	err := w.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(wcBucketName))
 		if b == nil {
 			return nil
@@ -347,6 +378,11 @@ func (w *WatchCollection) LatestSynced(ctx context.Context) (version uint64) {
 		version = wcBytesToUint64(raw)
 		return nil
 	})
+	if err != nil {
+		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
+	}
 	return version
 }
 
@@ -367,5 +403,7 @@ func (w *WatchCollection) Clear(ctx context.Context) {
 
 	if err != nil {
 		logger.Error(err)
+		// 本地 DB 事务失败，服务无法正常运行，直接 panic
+		panic(err)
 	}
 }

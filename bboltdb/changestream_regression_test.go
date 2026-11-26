@@ -50,8 +50,9 @@ func newSmallMmapChangeStream(t *testing.T) (*ChangeStream, *bbolt.DB) {
 }
 
 // saveRaw 不带 *testing.T，可在 goroutine 里安全调用
-// （mustSave 里有 t.Fatalf，只能跑在测试 goroutine）。
-func saveRaw(cs *ChangeStream, token, value string) (db.StreamId, error) {
+// （mustSave 里有 t.Helper，只能跑在测试 goroutine）。
+// Save 已改成单返回值 + 本地 DB 事务失败直接 panic，故这里不再有 error。
+func saveRaw(cs *ChangeStream, token, value string) db.StreamId {
 	return cs.Save(context.Background(),
 		db.ResumeToken([]byte(token)),
 		db.StreamValue([]byte(value)))
@@ -77,13 +78,9 @@ func TestChangeStreamIterAllowsWriteWhileNextIsTrue(t *testing.T) {
 	ctx := context.Background()
 
 	// lastsent 必须先存在，否则 AllNotSent 直接返回 ErrNotFoundSentPoint
-	if _, err := saveRaw(cs, "t1", ""); err != nil { // id=1: nil value 占位
-		t.Fatalf("Save(seed) failed: %v", err)
-	}
+	saveRaw(cs, "t1", "") // id=1: nil value 占位
 	cs.MarkSentUpTo(ctx, csUint64ToBytes(1))
-	if _, err := saveRaw(cs, "t2", "v2"); err != nil {
-		t.Fatalf("Save(v2) failed: %v", err)
-	}
+	saveRaw(cs, "t2", "v2")
 
 	it := cs.AllNotSent(ctx)
 	defer it.Release(ctx)
@@ -102,7 +99,6 @@ func TestChangeStreamIterAllowsWriteWhileNextIsTrue(t *testing.T) {
 	// 此刻若迭代器仍持有读事务，下面的写事务就会卡在 mmaplock。
 	// 放 goroutine + 超时，避免用例本身挂死。
 	done := make(chan struct{})
-	errCh := make(chan error, 1)
 	go func() {
 		defer close(done)
 
@@ -110,25 +106,14 @@ func TestChangeStreamIterAllowsWriteWhileNextIsTrue(t *testing.T) {
 
 		// 再写一批数据，确保至少一次 mmap grow 发生在"迭代期间"。
 		// 只 MarkSentUpTo 一次未必能顶到当前 mmap 边界，多写几条才稳。
+		// Save 失败现在直接 panic，会立刻让本 goroutine（及测试进程）暴露问题。
 		for i := 0; i < 500; i++ {
-			if _, err := saveRaw(cs,
-				fmt.Sprintf("t%d", i+3), fmt.Sprintf("v%d", i+3)); err != nil {
-				select {
-				case errCh <- err:
-				default:
-				}
-				return
-			}
+			saveRaw(cs, fmt.Sprintf("t%d", i+3), fmt.Sprintf("v%d", i+3))
 		}
 	}()
 
 	select {
 	case <-done:
-		select {
-		case err := <-errCh:
-			t.Fatalf("迭代期间 Save failed: %v", err)
-		default:
-		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Next() 返回 true 后的写操作死锁：迭代器仍持有 bbolt 读事务（mmaplock.Lock 与读事务 RLock 互等）")
 	}
@@ -148,17 +133,12 @@ func TestChangeStreamIterMarkSentUpToAfterEveryBatch(t *testing.T) {
 	cs, _ := newSmallMmapChangeStream(t)
 	ctx := context.Background()
 
-	if _, err := saveRaw(cs, "t1", ""); err != nil {
-		t.Fatalf("Save(seed) failed: %v", err)
-	}
+	saveRaw(cs, "t1", "")
 	cs.MarkSentUpTo(ctx, csUint64ToBytes(1))
 
 	const total = 6
 	for i := 0; i < total; i++ {
-		if _, err := saveRaw(cs,
-			fmt.Sprintf("t%d", i+2), fmt.Sprintf("v%d", i+2)); err != nil {
-			t.Fatalf("Save(%d) failed: %v", i+2, err)
-		}
+		saveRaw(cs, fmt.Sprintf("t%d", i+2), fmt.Sprintf("v%d", i+2))
 	}
 
 	done := make(chan struct{})
