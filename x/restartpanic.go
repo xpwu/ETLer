@@ -68,11 +68,13 @@ func AutoRestartPanic(startAndBlock func(context.Context) error, options ...Opti
 				err = startAndBlock(ctx)
 			}()
 
+			// err != nil: startAndBlock 服务主动抛出错误，标明服务期待结束，但是需要打印出Error;
+			// err == nil: startAndBlock 服务没有抛出错误，说明是 panic，需要重启
 			if err == nil {
 				logger.Error(fmt.Sprintf("crashed! Will be restarted automatically after %s", opt.duration))
 				time.Sleep(opt.duration)
 			} else {
-				logger.Fatal(fmt.Sprintf("stopped! Not Served! Because error: %v", err))
+				logger.Error(fmt.Sprintf("stopped! Not Served! Because error: %v", err))
 				break
 			}
 		}

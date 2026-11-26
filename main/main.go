@@ -21,7 +21,7 @@ func main() {
 
 		err := bboltdb.Init()
 		if err != nil {
-			log.Error(fmt.Sprintf("init bbolt db error: %s", err))
+			log.Fatal(fmt.Sprintf("init bbolt db error: %s", err))
 			os.Exit(2)
 		}
 
