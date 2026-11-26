@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/xpwu/ETLer/etl/db"
 	"github.com/xpwu/go-log/log"
@@ -137,14 +138,14 @@ func (s *Sender) Start() (isBusy bool) {
 
 		// 是本 go func 停止的，就对外发出事件通知
 		if canceled {
-			switch err {
-			case ErrSendFailed:
+			switch {
+			case errors.Is(err, ErrSendFailed):
 				s.done(SendFailed)
-			case db.ErrNotFoundSentPoint:
+			case errors.Is(err, db.ErrNotFoundSentPoint):
 				s.done(NeedForceSync)
-			case context.Canceled:
+			case errors.Is(err, context.Canceled):
 				s.done(ByStopped)
-			case nil:
+			case err == nil:
 				s.done(Ok)
 			default:
 				s.done(UnknownErr)
@@ -208,7 +209,7 @@ func (s *Sender) sync() error {
 		for {
 			cursor, err := coll.Find(ctx, bson.D{{"_id", bson.D{{"$gt", docId}}}},
 				options.Find().SetLimit(int64(s.batch)).SetSort(bson.D{{"_id", 1}}))
-			if err == context.Canceled {
+			if errors.Is(err, context.Canceled) {
 				logger.Debug(err)
 				return err
 			}
@@ -222,7 +223,7 @@ func (s *Sender) sync() error {
 				docId = cursor.Current.Lookup("_id")
 				all = append(all, cursor.Current)
 			}
-			if cursor.Err() == context.Canceled {
+			if errors.Is(cursor.Err(), context.Canceled) {
 				return cursor.Err()
 			}
 
