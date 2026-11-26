@@ -10,14 +10,10 @@ import (
 	"go.etcd.io/bbolt"
 )
 
-// 落盘位置：<repo>/bboltdb/panic_contract_test.go（新建，同包）
-// 本文件自带 requirePanicCS，不依赖 db_failure_test.go 的 helper，可单独落盘。
-//
 // 钉住产品侧新契约「所有 DBer 接口出现服务不可运行的异常，直接 panic」，
 // 以及迭代器的【例外】：ChangeStreamIter.Next 的 View 失败走 it.err → Err()，
 // 不 panic。后者是 sender 的 UnknownErr → 5s 重试兜底所依赖的，
 // 不能为了「统一 panic」而改掉。
-
 
 func requirePanicCS(t *testing.T, name string, fn func()) {
 	t.Helper()
